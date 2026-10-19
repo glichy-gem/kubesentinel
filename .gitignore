@@ -1,0 +1,19 @@
+# secrets: never commit
+.env
+*.pem
+*.key
+kubeconfig*
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# tooling and data
+*.sqlite
+*.db
+evals/results/*.csv
+.ipynb_checkpoints/
+.DS_Store
