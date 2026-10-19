@@ -1,0 +1,18 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubesentinel
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # demo app (orders-api / frontend)
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Grafana
+      - containerPort: 30300
+        hostPort: 3000
+        protocol: TCP
+      # Prometheus
+      - containerPort: 30900
+        hostPort: 9090
+        protocol: TCP
