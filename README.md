@@ -2,7 +2,7 @@
 
 AIOps for Kubernetes: turns a flood of alerts into **one incident** with a likely root cause, the evidence behind it, and a **safe, human-approved fix**.
 
-> Status: Phase 0 (planning and setup). The agent does not exist yet; this README describes the goals the project is built against.
+> Status: Phase 1 (demo application) complete. The agent does not exist yet; this README describes the goals the project is built against.
 
 ## Problem
 
@@ -57,15 +57,42 @@ kind (1 node) - Python / FastAPI / Pydantic - Prometheus, Loki, Grafana, Alertma
 
 ## Quick start (current state)
 
-Requires WSL2 with Docker Engine, `kind`, `kubectl` and `make`.
+Requires WSL2 with Docker Engine, `kind`, `kubectl`, `uv` and `make`, plus a clone of
+[`kubesentinel-gitops`](https://github.com/glichy-gem/kubesentinel-gitops) next to this repo.
 
 ```bash
 make cluster   # create the local kind cluster
+make test      # unit tests for orders-api (no cluster needed)
+make app       # build the orders-api image, load it into kind, deploy redis + orders-api
 make status    # show nodes and pods
 make down      # delete the cluster
 ```
 
+Try the demo service once `make app` finishes:
+
+```bash
+curl localhost:8080/health
+curl -X POST localhost:8080/orders -H 'content-type: application/json' -d '{"item":"book","quantity":2}'
+curl localhost:8080/orders
+curl localhost:8080/metrics
+```
+
 Ports mapped from your laptop into the cluster: `8080` (app), `3000` (Grafana), `9090` (Prometheus).
+
+## Demo service: orders-api
+
+A small FastAPI service backed by Redis. It exists so there is something realistic to observe and break.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness: the process is up. Never touches Redis |
+| `GET /ready` | Readiness: returns 503 while Redis is unreachable |
+| `GET /metrics` | Prometheus metrics: request count, latency histogram, 5xx count |
+| `POST /orders`, `GET /orders`, `GET /orders/{id}` | Create and read orders |
+| `GET /chaos/cpu`, `GET /chaos/memory` | Create CPU and memory pressure for failure scenarios (demo only) |
+
+Logs are one JSON object per line with a request id, so they are easy to query in Loki.
+When Redis goes down, the pods become `NotReady` and stop receiving traffic but are not restarted.
 
 ## Repository layout
 
@@ -84,8 +111,8 @@ A second repository, `kubesentinel-gitops`, holds the manifests that Argo CD wat
 
 | Phase | Weeks | Content |
 |---|---|---|
-| 0 | 1 | Planning and setup (this phase) |
-| 1 | 2 | Demo application |
+| 0 | 1 | Planning and setup (done) |
+| 1 | 2 | Demo application (done) |
 | 2 | 3 | CI/CD with GitOps |
 | 3 | 4-5 | Observability and alert rules |
 | 4 | 6 | Failure injection framework |
