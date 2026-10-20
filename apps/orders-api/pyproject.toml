@@ -21,6 +21,11 @@ dev = [
 [tool.uv]
 package = false
 
+[tool.ruff]
+# Resolve first-party imports relative to this file, so ruff behaves the same
+# from the repo root (pre-commit) and from this directory (CI).
+src = ["."]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
