@@ -11,6 +11,18 @@ def test_health_is_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_version_reports_configured_build(redis_server: fakeredis.FakeServer) -> None:
+    from app.config import Settings
+    from app.main import create_app
+    from app.store import OrderStore
+
+    fake = fakeredis.FakeStrictRedis(server=redis_server, decode_responses=True)
+    app = create_app(store=OrderStore(fake), settings=Settings(version="abc1234"))
+    response = TestClient(app).get("/version")
+    assert response.status_code == 200
+    assert response.json() == {"version": "abc1234"}
+
+
 def test_ready_when_redis_is_up(client: TestClient) -> None:
     response = client.get("/ready")
     assert response.status_code == 200

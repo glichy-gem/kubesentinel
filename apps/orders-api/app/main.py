@@ -81,6 +81,11 @@ def create_app(
         """Liveness: the process is up. Must not depend on Redis."""
         return {"status": "ok"}
 
+    @app.get("/version")
+    def version() -> dict[str, str]:
+        """The Git commit this image was built from, for tracing a pod to its code."""
+        return {"version": settings.version}
+
     @app.get("/ready")
     def ready(store: StoreDep) -> dict[str, str]:
         """Readiness: the service can do useful work, so Redis must answer."""

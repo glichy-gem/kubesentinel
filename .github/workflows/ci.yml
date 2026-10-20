@@ -61,7 +61,12 @@ jobs:
         id: meta
         run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - name: Build image
-        run: docker build --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t "${IMAGE}:${{ steps.meta.outputs.tag }}" apps/orders-api
+        run: |
+          docker build \
+            --build-arg "GIT_SHA=${GITHUB_SHA::7}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${IMAGE}:${{ steps.meta.outputs.tag }}" \
+            apps/orders-api
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
