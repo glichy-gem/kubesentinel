@@ -1,0 +1,124 @@
+name: ci
+
+on:
+  pull_request:
+    paths:
+      - "apps/orders-api/**"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/orders-api/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/orders-api
+  GITOPS_REPO: ${{ github.repository_owner }}/kubesentinel-gitops
+
+jobs:
+  test:
+    name: lint and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/orders-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Lint
+        run: uvx ruff@0.17.1 check .
+      - name: Format check
+        run: uvx ruff@0.17.1 format --check .
+      - name: Unit tests
+        run: uv run pytest -q
+
+  image:
+    name: build, scan and push image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: apps/orders-api/Dockerfile
+          failure-threshold: warning
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Build image
+        run: docker build --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t "${IMAGE}:${{ steps.meta.outputs.tag }}" apps/orders-api
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image
+        if: github.event_name == 'push'
+        run: docker push "${IMAGE}:${{ steps.meta.outputs.tag }}"
+
+  deploy:
+    name: bump image tag in GitOps repo
+    needs: image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Serialise deploys so two merges cannot race on the same file.
+    concurrency:
+      group: gitops-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Check out GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          path: gitops
+      - name: Update image tag
+        working-directory: gitops
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+        run: yq -i '.images[0].newTag = strenv(TAG)' apps/orders-api/kustomization.yaml
+      - name: Commit and push
+        working-directory: gitops
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+        run: |
+          if git diff --quiet; then
+            echo "Tag already ${TAG}, nothing to deploy."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy(orders-api): ${TAG}" \
+            -m "Source: ${{ github.repository }}@${{ github.sha }}" \
+            -m "Triggered by: ${{ github.actor }}" \
+            -m "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((attempt * 3))
+          done
+          echo "Could not push after 3 attempts" >&2
+          exit 1

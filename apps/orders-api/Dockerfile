@@ -8,6 +8,8 @@ RUN uv sync --frozen --no-dev
 
 # Stage 2: small runtime image with only the virtualenv and the app code.
 FROM python:3.12-slim
+# Links the GHCR package to this repository (and its public visibility).
+LABEL org.opencontainers.image.source="https://github.com/glichy-gem/kubesentinel"
 RUN useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
