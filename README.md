@@ -2,7 +2,7 @@
 
 AIOps for Kubernetes: turns a flood of alerts into **one incident** with a likely root cause, the evidence behind it, and a **safe, human-approved fix**.
 
-> Status: Phase 1 (demo application) complete. The agent does not exist yet; this README describes the goals the project is built against.
+> Status: Phase 2 (CI/CD with GitOps) complete. The agent does not exist yet; this README describes the goals the project is built against.
 
 ## Problem
 
@@ -61,14 +61,18 @@ Requires WSL2 with Docker Engine, `kind`, `kubectl`, `uv` and `make`, plus a clo
 [`kubesentinel-gitops`](https://github.com/glichy-gem/kubesentinel-gitops) next to this repo.
 
 ```bash
-make cluster   # create the local kind cluster
-make test      # unit tests for orders-api (no cluster needed)
-make app       # build the orders-api image, load it into kind, deploy redis + orders-api
-make status    # show nodes and pods
-make down      # delete the cluster
+make cluster        # create the local kind cluster
+make argocd         # install Argo CD (core) and point it at the GitOps repo
+make argocd-status  # show Argo CD applications and the demo pods
+make test           # unit tests for orders-api (no cluster needed)
+make status         # show nodes and pods
+make down           # delete the cluster
 ```
 
-Try the demo service once `make app` finishes:
+After `make argocd`, Argo CD pulls the pinned image from GHCR and the demo app appears on its own
+(allow a minute for the first sync).
+
+Try the demo service once Argo CD reports `Synced` and `Healthy`:
 
 ```bash
 curl localhost:8080/health
@@ -107,13 +111,27 @@ docs/        threat model, ADRs, runbooks
 
 A second repository, `kubesentinel-gitops`, holds the manifests that Argo CD watches.
 
+## CI/CD
+
+```
+push to main -> CI: ruff + pytest -> build image -> hadolint + Trivy -> push ghcr.io/.../orders-api:sha-<commit>
+             -> commit the new tag to kubesentinel-gitops -> Argo CD syncs the cluster
+```
+
+- Pull requests run lint, tests, build and scan only. Nothing is published and no secrets are used.
+- Every deploy is a commit in the GitOps repo that records the source commit, author and run URL.
+- Argo CD self-heals: a manual `kubectl` change that disagrees with Git is reverted within seconds.
+- Rollback is a `git revert` in the GitOps repo.
+
+See [ADR 4](docs/adr/0004-gitops-with-two-repos-and-argocd-core.md) for the reasoning and trade-offs.
+
 ## Roadmap
 
 | Phase | Weeks | Content |
 |---|---|---|
 | 0 | 1 | Planning and setup (done) |
 | 1 | 2 | Demo application (done) |
-| 2 | 3 | CI/CD with GitOps |
+| 2 | 3 | CI/CD with GitOps (done) |
 | 3 | 4-5 | Observability and alert rules |
 | 4 | 6 | Failure injection framework |
 | 5 | 7-8 | The agent |
