@@ -10,5 +10,7 @@ class Settings(BaseSettings):
     # Short timeouts so a dead Redis fails fast instead of hanging requests.
     redis_timeout_seconds: float = 1.0
     log_level: str = "INFO"
+    # Git commit this image was built from. Set at build time by CI.
+    version: str = "dev"
     # Endpoints used by chaos scenarios to create CPU and memory pressure.
     enable_chaos_endpoints: bool = True

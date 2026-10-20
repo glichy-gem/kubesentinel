@@ -14,7 +14,8 @@ RUN useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY app ./app
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+ARG GIT_SHA=dev
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 ORDERS_VERSION=$GIT_SHA
 USER 10001
 EXPOSE 8000
 # Access logs are off: the app writes its own structured request log.
