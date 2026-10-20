@@ -1,0 +1,24 @@
+# A PodMonitor (not a ServiceMonitor) on purpose: it scrapes pods even while
+# they are NotReady. During a Redis outage the pods leave the Service's
+# endpoints, but we still want their error metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: orders-api
+  namespace: monitoring
+  labels:
+    app: orders-api
+spec:
+  namespaceSelector:
+    matchNames: [demo]
+  selector:
+    matchLabels:
+      app: orders-api
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      relabelings:
+        # Alertmanager groups by namespace and service; expose the app label as `service`.
+        - sourceLabels: [__meta_kubernetes_pod_label_app]
+          targetLabel: service

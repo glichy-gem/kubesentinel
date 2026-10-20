@@ -1,0 +1,231 @@
+# Unit tests for kubesentinel-rules.yaml. Run with: make rules-test
+# `rules.yaml` is the .spec of the PrometheusRule, extracted by the Makefile.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # ---------------------------------------------------------------- PodCrashLooping
+  - name: PodCrashLooping fires when a container restarts every 30 seconds
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: demo
+              pod: orders-api-5456866b77-abcde
+              container: orders-api
+              service: orders-api
+            exp_annotations:
+              summary: "orders-api is crash looping"
+              description: "Container orders-api in pod orders-api-5456866b77-abcde restarted more than 3 times in the last 5 minutes."
+
+  - name: PodCrashLooping stays quiet for a single restart
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api"}'
+        values: "0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PodCrashLooping
+        exp_alerts: []
+
+  - name: PodCrashLooping ignores namespaces other than demo
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="kube-system", pod="coredns-5456866b77-abcde", container="coredns"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PodCrashLooping
+        exp_alerts: []
+
+  # ------------------------------------------------------------------ PodOOMKilled
+  - name: PodOOMKilled fires when the last termination was OOMKilled and the pod restarted
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api", reason="OOMKilled"}'
+        values: "1x20"
+      - series: 'kube_pod_container_status_restarts_total{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PodOOMKilled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: demo
+              pod: orders-api-5456866b77-abcde
+              container: orders-api
+              reason: OOMKilled
+              service: orders-api
+            exp_annotations:
+              summary: "orders-api was OOMKilled"
+              description: "Container orders-api in pod orders-api-5456866b77-abcde was killed for exceeding its memory limit and restarted."
+
+  - name: PodOOMKilled stays quiet for other termination reasons
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api", reason="Error"}'
+        values: "1x20"
+      - series: 'kube_pod_container_status_restarts_total{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PodOOMKilled
+        exp_alerts: []
+
+  - name: PodOOMKilled stays quiet for an old OOM kill with no recent restart
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api", reason="OOMKilled"}'
+        values: "1x40"
+      - series: 'kube_pod_container_status_restarts_total{namespace="demo", pod="orders-api-5456866b77-abcde", container="orders-api"}'
+        values: "3x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PodOOMKilled
+        exp_alerts: []
+
+  # ------------------------------------------------- DeploymentReplicasMismatch
+  - name: DeploymentReplicasMismatch fires after 5 minutes of missing replicas
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="demo", deployment="orders-api"}'
+        values: "2x30"
+      - series: 'kube_deployment_status_replicas_available{namespace="demo", deployment="orders-api"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: DeploymentReplicasMismatch
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: DeploymentReplicasMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+              deployment: orders-api
+              service: orders-api
+            exp_annotations:
+              summary: "orders-api has fewer available replicas than desired"
+              description: "Deployment orders-api has had fewer available replicas than desired for 5 minutes."
+
+  - name: DeploymentReplicasMismatch stays quiet when all replicas are available
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="demo", deployment="orders-api"}'
+        values: "2x30"
+      - series: 'kube_deployment_status_replicas_available{namespace="demo", deployment="orders-api"}'
+        values: "2x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeploymentReplicasMismatch
+        exp_alerts: []
+
+  # ------------------------------------------------------------- HighErrorRate
+  - name: HighErrorRate fires when about 30 percent of requests fail
+    interval: 30s
+    input_series:
+      - series: 'http_request_errors_total{namespace="demo", service="orders-api", pod="orders-api-a", method="GET", path="/ready"}'
+        values: "0+3x30"
+      - series: 'http_requests_total{namespace="demo", service="orders-api", pod="orders-api-a", method="GET", path="/ready", status="503"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: demo
+              service: orders-api
+            exp_annotations:
+              summary: "orders-api 5xx error rate is above 5%"
+              description: "More than 5% of requests to orders-api returned a 5xx status for 2 minutes."
+
+  - name: HighErrorRate stays quiet at 3 percent errors
+    interval: 30s
+    input_series:
+      - series: 'http_request_errors_total{namespace="demo", service="orders-api", pod="orders-api-a", method="GET", path="/ready"}'
+        values: "0+0.3x30"
+      - series: 'http_requests_total{namespace="demo", service="orders-api", pod="orders-api-a", method="GET", path="/ready", status="200"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HighErrorRate
+        exp_alerts: []
+
+  # ------------------------------------------------------------- HighLatencyP95
+  - name: HighLatencyP95 fires when most requests take 0.5 to 1 second
+    interval: 30s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="0.5"}'
+        values: "0+0x30"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="1"}'
+        values: "0+10x30"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="+Inf"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HighLatencyP95
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+              service: orders-api
+            exp_annotations:
+              summary: "orders-api p95 latency is above 500 ms"
+              description: "The 95th percentile request latency of orders-api has been above 500 ms for 3 minutes."
+
+  - name: HighLatencyP95 stays quiet when requests are fast
+    interval: 30s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="0.25"}'
+        values: "0+10x30"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="0.5"}'
+        values: "0+10x30"
+      - series: 'http_request_duration_seconds_bucket{namespace="demo", service="orders-api", le="+Inf"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HighLatencyP95
+        exp_alerts: []
+
+  # --------------------------------------------------------------- PVCAlmostFull
+  - name: PVCAlmostFull fires at 90 percent usage after 5 minutes
+    interval: 30s
+    input_series:
+      - series: 'kubelet_volume_stats_used_bytes{namespace="demo", persistentvolumeclaim="data"}'
+        values: "90x30"
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="demo", persistentvolumeclaim="data"}'
+        values: "100x30"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PVCAlmostFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: demo
+              persistentvolumeclaim: data
+              service: data
+            exp_annotations:
+              summary: "Volume data is more than 85% full"
+              description: "PersistentVolumeClaim data in namespace demo has been above 85% usage for 5 minutes."
+
+  - name: PVCAlmostFull stays quiet at 80 percent usage
+    interval: 30s
+    input_series:
+      - series: 'kubelet_volume_stats_used_bytes{namespace="demo", persistentvolumeclaim="data"}'
+        values: "80x30"
+      - series: 'kubelet_volume_stats_capacity_bytes{namespace="demo", persistentvolumeclaim="data"}'
+        values: "100x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PVCAlmostFull
+        exp_alerts: []

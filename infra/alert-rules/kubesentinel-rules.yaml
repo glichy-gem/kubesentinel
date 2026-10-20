@@ -1,0 +1,102 @@
+# Alert rules KubeSentinel reacts to. Unit tests: infra/alert-rules/tests (make rules-test).
+#
+# Every alert carries `namespace`, `service` and `severity` labels so Alertmanager
+# can group by namespace and service, and the agent can group alerts into one incident.
+# The `service` label is derived from the Deployment or pod name where the source
+# metric does not already have one.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubesentinel-rules
+  namespace: monitoring
+  labels:
+    app: kubesentinel
+spec:
+  groups:
+    - name: kubesentinel.workloads
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            sum by (namespace, pod, container, service) (
+              label_replace(
+                increase(kube_pod_container_status_restarts_total{namespace="demo"}[5m]),
+                "service", "$1", "pod", "^(.+)-[a-z0-9]+-[a-z0-9]+$"
+              )
+            ) > 3
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} is crash looping"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} restarted more than 3 times in the last 5 minutes."
+
+        - alert: PodOOMKilled
+          expr: |
+            label_replace(
+              kube_pod_container_status_last_terminated_reason{namespace="demo", reason="OOMKilled"} == 1
+              and on (namespace, pod, container)
+              increase(kube_pod_container_status_restarts_total{namespace="demo"}[10m]) > 0,
+              "service", "$1", "pod", "^(.+)-[a-z0-9]+-[a-z0-9]+$"
+            )
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} was OOMKilled"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} was killed for exceeding its memory limit and restarted."
+
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            label_replace(
+              kube_deployment_spec_replicas{namespace="demo"}
+              - kube_deployment_status_replicas_available{namespace="demo"} > 0,
+              "service", "$1", "deployment", "(.+)"
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} has fewer available replicas than desired"
+            description: "Deployment {{ $labels.deployment }} has had fewer available replicas than desired for 5 minutes."
+
+    - name: kubesentinel.traffic
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum by (namespace, service) (rate(http_request_errors_total[2m]))
+              /
+              sum by (namespace, service) (rate(http_requests_total[2m]))
+            ) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} 5xx error rate is above 5%"
+            description: "More than 5% of requests to {{ $labels.service }} returned a 5xx status for 2 minutes."
+
+        - alert: HighLatencyP95
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le, namespace, service) (rate(http_request_duration_seconds_bucket[5m]))
+            ) > 0.5
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} p95 latency is above 500 ms"
+            description: "The 95th percentile request latency of {{ $labels.service }} has been above 500 ms for 3 minutes."
+
+    - name: kubesentinel.storage
+      rules:
+        - alert: PVCAlmostFull
+          expr: |
+            label_replace(
+              kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85,
+              "service", "$1", "persistentvolumeclaim", "(.+)"
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Volume {{ $labels.persistentvolumeclaim }} is more than 85% full"
+            description: "PersistentVolumeClaim {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} has been above 85% usage for 5 minutes."

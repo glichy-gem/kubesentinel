@@ -3,16 +3,22 @@ apiVersion: kind.x-k8s.io/v1alpha4
 name: kubesentinel
 nodes:
   - role: control-plane
+    # listenAddress keeps these ports on your laptop only. Without it Docker
+    # publishes them on 0.0.0.0, so anyone on the same network could reach
+    # Grafana and Prometheus.
     extraPortMappings:
       # demo app (orders-api / frontend)
       - containerPort: 30080
         hostPort: 8080
+        listenAddress: "127.0.0.1"
         protocol: TCP
       # Grafana
       - containerPort: 30300
         hostPort: 3000
+        listenAddress: "127.0.0.1"
         protocol: TCP
       # Prometheus
       - containerPort: 30900
         hostPort: 9090
+        listenAddress: "127.0.0.1"
         protocol: TCP
