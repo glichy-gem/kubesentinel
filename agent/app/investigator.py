@@ -20,6 +20,20 @@ from app.rca import RCAResult, diagnose
 logger = logging.getLogger("kubesentinel.investigator")
 
 
+def symptom_start(incident: dict) -> datetime:
+    """When the current symptoms began: the earliest start among firing alerts.
+
+    Collectors look for deploys and OOM kills relative to this time. Using the
+    incident's first alert instead breaks on long-lived incidents: found live,
+    a reopened incident looked for deploys 40 minutes too early, missed the bad
+    commit, and counted a stale OOM kill as recent.
+    """
+    firing = [
+        a["starts_at"] for a in incident.get("alerts", []) if a["status"] == "firing"
+    ]
+    return datetime.fromisoformat(min(firing) if firing else incident["first_alert_at"])
+
+
 class Investigator:
     def __init__(
         self,
@@ -58,9 +72,8 @@ class Investigator:
         if incident is None:
             raise ValueError(f"incident {incident_id} not found")
         started = time.perf_counter()
-        first_alert_at = datetime.fromisoformat(incident["first_alert_at"])
         evidence = self.collector.collect(
-            incident["namespace"], incident["service"], first_alert_at
+            incident["namespace"], incident["service"], symptom_start(incident)
         )
         collect_ms = int((time.perf_counter() - started) * 1000)
 
