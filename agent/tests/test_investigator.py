@@ -59,6 +59,16 @@ def test_repeat_notifications_do_not_trigger_new_investigations(tmp_path):
     assert len(llm.prompts) == 1
 
 
+def test_a_new_symptom_triggers_a_second_investigation(tmp_path):
+    llm = FakeLLM(reply(), reply())
+    client, investigator = make_client(tmp_path, llm)
+    client.post("/alerts", json=am_payload(am_alert("PodCrashLooping", starts_at=T0)))
+    client.post("/alerts", json=am_payload(am_alert("PodOOMKilled", starts_at=T0)))
+    investigator._pool.shutdown(wait=True)
+    assert len(llm.prompts) == 2
+    assert "PodOOMKilled" in llm.prompts[1]
+
+
 def test_reinvestigate_endpoint(tmp_path):
     client, investigator = make_client(tmp_path, FakeLLM(reply(), reply()))
     incident_id = client.post("/alerts", json=am_payload(am_alert())).json()[

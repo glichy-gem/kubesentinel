@@ -94,6 +94,44 @@ def test_incident_closes_after_quiet_period_and_new_alert_opens_a_new_one(
     assert [i["status"] for i in db.list_incidents()] == ["open", "closed"]
 
 
+def test_a_different_failure_after_resolution_opens_a_new_incident(correlator, db):
+    # Found live: a crash loop minutes after an OOM incident resolved was folded
+    # into the old incident and never investigated.
+    correlator.ingest(parse(am_alert("PodOOMKilled")), minutes(0))
+    correlator.ingest(parse(am_alert("PodOOMKilled", status="resolved")), minutes(10))
+    changes = correlator.ingest(parse(am_alert("PodCrashLooping")), minutes(14))
+    assert [c.event for c in changes] == ["opened"]
+    assert [i["status"] for i in db.list_incidents()] == ["open", "resolved"]
+
+
+def test_new_symptoms_in_an_open_incident_are_reported_once(correlator):
+    first = correlator.ingest(parse(am_alert("PodCrashLooping")), minutes(0))
+    assert first[0].new_symptoms == ()  # opening is already a reason to investigate
+    assert first[0].needs_investigation
+
+    changes = correlator.ingest(
+        parse(am_alert("PodOOMKilled"), am_alert("PodCrashLooping")), minutes(1)
+    )
+    assert changes[0].event == "updated"
+    assert changes[0].new_symptoms == ("PodOOMKilled",)
+    assert changes[0].needs_investigation
+
+    repeat = correlator.ingest(parse(am_alert("PodOOMKilled")), minutes(2))
+    assert repeat[0].new_symptoms == ()
+    assert not repeat[0].needs_investigation
+
+
+def test_resolution_never_triggers_an_investigation(correlator):
+    correlator.ingest(parse(am_alert("A")), minutes(0))
+    changes = correlator.ingest(
+        parse(am_alert("A", status="resolved"), am_alert("B", status="resolved")),
+        minutes(3),
+    )
+    assert changes[0].event == "resolved"
+    assert changes[0].new_symptoms == ("B",)
+    assert not changes[0].needs_investigation
+
+
 def test_one_payload_with_two_services_reports_both(correlator):
     changes = correlator.ingest(
         parse(am_alert(service="orders-api"), am_alert(service="redis")), minutes(0)
