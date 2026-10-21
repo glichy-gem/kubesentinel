@@ -110,7 +110,8 @@ def create_app(
         changes = correlator.ingest(payload, now_utc())
         for change in changes:
             INCIDENT_EVENTS.labels(change.event).inc()
-            if change.event == "opened" and investigator is not None:
+            # A new incident, a flapping one, or a new kind of symptom: look (again).
+            if change.needs_investigation and investigator is not None:
                 investigator.submit(change.incident_id)
             logger.info(
                 "incident %s",
@@ -119,6 +120,7 @@ def create_app(
                     "fields": {
                         "incident_id": change.incident_id,
                         "event": change.event,
+                        "new_symptoms": list(change.new_symptoms),
                         "alerts": [a.name for a in payload.alerts],
                     }
                 },
