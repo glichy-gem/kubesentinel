@@ -17,7 +17,8 @@ RULES: list[tuple[re.Pattern[str], str]] = [
     ),
     (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"), "[REDACTED]"),  # Google API keys
     (re.compile(r"\bAQ\.[0-9A-Za-z_-]{30,}"), "[REDACTED]"),  # Google auth keys
-    (re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{30,}"), "[REDACTED]"),  # Telegram bot tokens
+    # Telegram bot tokens, also inside URLs (".../bot123456:ABC..."), so no \b.
+    (re.compile(r"(?<![0-9])\d{6,}:[A-Za-z0-9_-]{30,}"), "[REDACTED]"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), "[REDACTED]"),  # GitHub tokens
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{20,}"), "Bearer [REDACTED]"),
     (

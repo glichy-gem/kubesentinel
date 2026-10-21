@@ -96,12 +96,14 @@ def render_card(incident: dict, action: dict) -> str:
     ]
     if action["mode"] != "none":
         lines.append(f"<code>{esc(action['description'])}</code>")
-    lines.append(
-        MODE_LINE[action["mode"]].format(
-            reason=esc(action["reason"]),
-            expires=(action.get("expires_at") or "")[11:16],
+    # Once decided, the card's footer (added by close_card) says what happened instead.
+    if not (action["mode"] == "approval" and action["status"] != "proposed"):
+        lines.append(
+            MODE_LINE[action["mode"]].format(
+                reason=esc(action["reason"]),
+                expires=(action.get("expires_at") or "")[11:16],
+            )
         )
-    )
     return "\n".join(lines)
 
 

@@ -140,6 +140,20 @@ def test_button_presses_are_authorised_by_chat_and_token(
     assert executed == ([1] if answer.startswith("Approved") else [])
 
 
+def test_decided_card_no_longer_asks_for_approval(db):
+    # Found live: the closed card still said "Needs your approval · expires".
+    action_id = proposed(db)
+    client = FakeTelegram()
+    notifier = Notifier(client, CHAT, db)
+    db.set_action_message(action_id, 7)
+    Approvals(db, lambda _: None, notifier).decide(
+        action_id, "unit-test-token", True, "Heyo"
+    )
+    text = client.calls[-1][1]["text"]
+    assert "Needs your approval" not in text
+    assert text.endswith("UTC") and "Approved by Heyo" in text
+
+
 def test_first_card_becomes_the_incident_thread(db):
     action_id = proposed(db)
     client = FakeTelegram()

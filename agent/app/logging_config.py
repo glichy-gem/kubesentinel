@@ -3,9 +3,11 @@ import logging
 import sys
 from datetime import UTC, datetime
 
+from app.redact import redact
+
 
 class JsonFormatter(logging.Formatter):
-    """One JSON object per line, easy to query in Loki."""
+    """One JSON object per line, easy to query in Loki. Secrets are redacted."""
 
     def format(self, record: logging.LogRecord) -> str:
         payload = {
@@ -18,7 +20,8 @@ class JsonFormatter(logging.Formatter):
         payload.update(getattr(record, "fields", {}))
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
-        return json.dumps(payload, default=str)
+        # Last line of defence: some clients put credentials in URLs (Telegram does).
+        return redact(json.dumps(payload, default=str))
 
 
 def configure_logging(level: str) -> None:
@@ -27,3 +30,7 @@ def configure_logging(level: str) -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+    # httpx logs every request URL at INFO, and the Telegram bot token is part of
+    # its URLs (found in the first live run). Our own logs say what matters.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
