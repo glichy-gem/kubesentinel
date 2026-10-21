@@ -1,6 +1,7 @@
-# Dummy Alertmanager receiver for Phase 3. It prints one JSON line per alert so
-# you can prove alerts arrive: kubectl -n monitoring logs deploy/webhook-sink
-# Phase 5 replaces it with the KubeSentinel agent's /alerts endpoint.
+# Dummy Alertmanager receiver. It prints one JSON line per alert so you can prove
+# alerts arrive: kubectl -n monitoring logs deploy/webhook-sink
+# Alertmanager posts to it alongside the agent; the chaos runner reads this log
+# as the independent record of when each alert was delivered.
 apiVersion: v1
 kind: ConfigMap
 metadata:

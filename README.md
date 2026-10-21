@@ -67,6 +67,7 @@ make argocd-status  # show Argo CD applications and the demo pods
 make stack          # install Prometheus, Alertmanager, Grafana, Loki, Alloy, rules, dashboards
 make grafana-password  # print the generated Grafana admin password
 make test           # unit tests for orders-api (no cluster needed)
+make agent-test     # unit tests for the agent (no cluster needed)
 make rules-test     # promtool check + unit tests for the alert rules
 make chaos S=oom    # inject one failure scenario, check its alerts, revert (see Failure scenarios)
 make chaos-test     # unit tests for the chaos runner + shellcheck (no cluster needed)
@@ -154,10 +155,32 @@ namespace are in Loki and queryable as JSON, for example `{app="orders-api"} | j
 | PodImagePullBackOff | a container cannot pull its image for 1 minute | critical |
 | PVCAlmostFull | volume above 85% for 5 minutes | warning |
 
-Alertmanager groups alerts by `namespace` and `service` and posts them to a webhook. Today that is a
-dummy receiver (`kubectl -n monitoring logs deploy/webhook-sink`); Phase 5 replaces it with the agent.
+Alertmanager groups alerts by `namespace` and `service` and posts them to the agent and to a dummy
+receiver (`kubectl -n monitoring logs deploy/webhook-sink`).
 Verified end to end: crashing `orders-api` by hand produced a `PodCrashLooping` notification at the
 webhook 78 seconds later.
+
+## The agent (in progress)
+
+`agent/` is a FastAPI service that Argo CD deploys to the `kubesentinel` namespace. Alertmanager
+posts every alert to it (and to the dummy sink, which the chaos runner uses as an independent clock).
+
+Built so far (Phase 5a):
+
+- **Intake**: `POST /alerts` validates the Alertmanager payload with Pydantic and stores every alert
+  in SQLite. Repeat notifications of the same alert update it instead of creating new work.
+- **Correlation**: alerts with the same namespace and service join one incident. An incident resolves
+  when none of its alerts is firing, reopens if they return, and closes after 10 quiet minutes.
+  `raw_alert_count` per incident is the alert-reduction metric.
+- **API**: `GET /incidents`, `GET /incidents/{id}`, plus `/metrics` for Prometheus.
+
+```bash
+kubectl -n kubesentinel port-forward svc/kubesentinel-agent 8000:8000
+curl localhost:8000/incidents
+```
+
+Next: evidence collectors, a rule-based signature matcher, the Gemini root-cause step, the policy
+gate and Telegram approvals.
 
 ## Failure scenarios
 

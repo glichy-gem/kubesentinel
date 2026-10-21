@@ -17,7 +17,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
+.PHONY: cluster down status test agent-test argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -32,6 +32,10 @@ status:
 # Run the orders-api unit tests (no cluster needed).
 test:
 	cd apps/orders-api && uv run pytest -q
+
+# Run the agent unit tests (no cluster needed).
+agent-test:
+	cd agent && uv run pytest -q
 
 # Install Argo CD (core, no UI) and hand it the GitOps repo. After this, every
 # deploy is a commit to kubesentinel-gitops; the demo app appears on its own.

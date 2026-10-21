@@ -1,0 +1,183 @@
+"""Turn a stream of alert notifications into a small number of incidents.
+
+Rules (design doc section 6.2):
+- Repeat notifications of the same alert (same fingerprint and startsAt) update
+  that alert; they never create new work.
+- Alerts with the same namespace and service join the incident for that key
+  while it is open, or resolved for less than the quiet period (a flapping
+  alert reopens its incident instead of opening a new one).
+- An incident resolves when none of its alerts is firing, and closes after the
+  quiet period with no new alerts.
+"""
+
+import json
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from app.db import SEVERITY_RANK, Database, iso
+from app.models import AlertmanagerAlert, AlertmanagerPayload
+
+
+@dataclass(frozen=True)
+class IncidentChange:
+    incident_id: int
+    event: str  # opened | updated | reopened | resolved
+
+
+class Correlator:
+    def __init__(self, db: Database, quiet_minutes: int) -> None:
+        self.db = db
+        self.quiet = timedelta(minutes=quiet_minutes)
+
+    def ingest(
+        self, payload: AlertmanagerPayload, now: datetime
+    ) -> list[IncidentChange]:
+        """Store one webhook payload and return what changed, one entry per incident."""
+        changes: dict[int, str] = {}
+        with self.db.transaction() as conn:
+            self._close_stale(conn, now)
+            for alert in payload.alerts:
+                incident_id, event = self._ingest_alert(conn, alert, now)
+                # "opened" and "reopened" are more informative than "updated".
+                if changes.get(incident_id) not in ("opened", "reopened"):
+                    changes[incident_id] = event
+            for incident_id in changes:
+                if self._resolve_if_quiet(conn, incident_id, now):
+                    changes[incident_id] = "resolved"
+        return [IncidentChange(i, e) for i, e in changes.items()]
+
+    def close_stale(self, now: datetime) -> int:
+        with self.db.transaction() as conn:
+            return self._close_stale(conn, now)
+
+    # ------------------------------------------------------------- internals
+
+    def _ingest_alert(
+        self, conn: sqlite3.Connection, alert: AlertmanagerAlert, now: datetime
+    ) -> tuple[int, str]:
+        starts_at = iso(alert.starts_at)
+        ends_at = (
+            iso(alert.ends_at) if alert.status == "resolved" and alert.ends_at else None
+        )
+        existing = conn.execute(
+            "SELECT id, incident_id FROM alerts WHERE fingerprint = ? AND starts_at = ?",
+            (alert.fingerprint, starts_at),
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                "UPDATE alerts SET status = ?, ends_at = ?, updated_at = ?,"
+                " notifications = notifications + 1 WHERE id = ?",
+                (alert.status, ends_at, iso(now), existing["id"]),
+            )
+            incident_id = existing["incident_id"]
+            event = "updated"
+        else:
+            incident_id, event = self._incident_for(conn, alert, now)
+            conn.execute(
+                "INSERT INTO alerts (incident_id, fingerprint, starts_at, name, severity,"
+                " status, labels, annotations, received_at, updated_at, ends_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    incident_id,
+                    alert.fingerprint,
+                    starts_at,
+                    alert.name,
+                    alert.severity,
+                    alert.status,
+                    json.dumps(alert.labels, sort_keys=True),
+                    json.dumps(alert.annotations, sort_keys=True),
+                    iso(now),
+                    iso(now),
+                    ends_at,
+                ),
+            )
+            conn.execute(
+                "UPDATE incidents SET raw_alert_count = raw_alert_count + 1,"
+                " first_alert_at = MIN(first_alert_at, ?) WHERE id = ?",
+                (starts_at, incident_id),
+            )
+            self._raise_severity(conn, incident_id, alert.severity)
+
+        conn.execute(
+            "UPDATE incidents SET notification_count = notification_count + 1,"
+            " updated_at = ? WHERE id = ?",
+            (iso(now), incident_id),
+        )
+        if alert.status == "firing" and event != "opened":
+            reopened = conn.execute(
+                "UPDATE incidents SET status = 'open', resolved_at = NULL"
+                " WHERE id = ? AND status = 'resolved'",
+                (incident_id,),
+            ).rowcount
+            if reopened:
+                event = "reopened"
+        return incident_id, event
+
+    def _incident_for(
+        self, conn: sqlite3.Connection, alert: AlertmanagerAlert, now: datetime
+    ) -> tuple[int, str]:
+        """The incident a new alert belongs to, creating one if needed."""
+        row = conn.execute(
+            "SELECT id FROM incidents WHERE namespace = ? AND service = ?"
+            " AND (status = 'open' OR (status = 'resolved' AND resolved_at > ?))"
+            " ORDER BY id DESC LIMIT 1",
+            (alert.namespace, alert.service, iso(now - self.quiet)),
+        ).fetchone()
+        if row:
+            return row["id"], "updated"
+        title = alert.annotations.get("summary") or f"{alert.name} on {alert.service}"
+        cursor = conn.execute(
+            "INSERT INTO incidents (namespace, service, status, severity, title,"
+            " opened_at, first_alert_at, updated_at)"
+            " VALUES (?, ?, 'open', ?, ?, ?, ?, ?)",
+            (
+                alert.namespace,
+                alert.service,
+                alert.severity,
+                title,
+                iso(now),
+                iso(alert.starts_at),
+                iso(now),
+            ),
+        )
+        return cursor.lastrowid, "opened"
+
+    @staticmethod
+    def _raise_severity(
+        conn: sqlite3.Connection, incident_id: int, severity: str
+    ) -> None:
+        current = conn.execute(
+            "SELECT severity FROM incidents WHERE id = ?", (incident_id,)
+        ).fetchone()["severity"]
+        if SEVERITY_RANK.get(severity, 0) > SEVERITY_RANK.get(current, 0):
+            conn.execute(
+                "UPDATE incidents SET severity = ? WHERE id = ?",
+                (severity, incident_id),
+            )
+
+    @staticmethod
+    def _resolve_if_quiet(
+        conn: sqlite3.Connection, incident_id: int, now: datetime
+    ) -> bool:
+        firing = conn.execute(
+            "SELECT COUNT(*) FROM alerts WHERE incident_id = ? AND status = 'firing'",
+            (incident_id,),
+        ).fetchone()[0]
+        if firing:
+            return False
+        return bool(
+            conn.execute(
+                "UPDATE incidents SET status = 'resolved', resolved_at = ?"
+                " WHERE id = ? AND status = 'open'",
+                (iso(now), incident_id),
+            ).rowcount
+        )
+
+    def _close_stale(self, conn: sqlite3.Connection, now: datetime) -> int:
+        return conn.execute(
+            "UPDATE incidents SET status = 'closed', closed_at = ?"
+            " WHERE status = 'resolved' AND resolved_at <= ?",
+            (iso(now), iso(now - self.quiet)),
+        ).rowcount
