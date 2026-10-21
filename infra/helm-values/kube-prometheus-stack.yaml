@@ -70,7 +70,9 @@ alertmanager:
       requests: { cpu: 10m, memory: 32Mi }
       limits: { cpu: 50m, memory: 64Mi }
   # All alerts go to one receiver, grouped so that related alerts for the same
-  # service arrive together. Phase 5 replaces the dummy sink with the agent.
+  # service arrive together. The receiver posts to the agent and to the dummy
+  # sink: the sink's log is the independent record the chaos runner times
+  # detection against, so the agent cannot grade its own homework.
   config:
     global:
       resolve_timeout: 5m
@@ -87,6 +89,8 @@ alertmanager:
     receivers:
       - name: kubesentinel-agent
         webhook_configs:
+          - url: http://kubesentinel-agent.kubesentinel.svc.cluster.local:8000/alerts
+            send_resolved: true
           - url: http://webhook-sink.monitoring.svc.cluster.local:8080/alerts
             send_resolved: true
 

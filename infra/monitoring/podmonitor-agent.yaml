@@ -1,0 +1,19 @@
+# Scrapes the KubeSentinel agent: alerts received and incidents by status,
+# which feed the Incidents dashboard.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kubesentinel-agent
+  namespace: monitoring
+  labels:
+    app: kubesentinel-agent
+spec:
+  namespaceSelector:
+    matchNames: [kubesentinel]
+  selector:
+    matchLabels:
+      app: kubesentinel-agent
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

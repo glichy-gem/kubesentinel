@@ -1,0 +1,138 @@
+name: python-service
+
+# Reusable pipeline for one Python service: lint, test, build, scan, push to GHCR,
+# then bump its image tag in the GitOps repo. Callers (ci.yml, agent.yml) decide
+# when it runs through their own path filters.
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: Directory with pyproject.toml and Dockerfile
+        required: true
+        type: string
+      image_name:
+        description: Image name under ghcr.io/<owner>/
+        required: true
+        type: string
+      gitops_app:
+        description: Folder under apps/ in the GitOps repo
+        required: true
+        type: string
+    secrets:
+      GITOPS_DEPLOY_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}
+  GITOPS_REPO: ${{ github.repository_owner }}/kubesentinel-gitops
+
+jobs:
+  test:
+    name: lint and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.context }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Lint
+        run: uvx ruff@0.17.1 check .
+      - name: Format check
+        run: uvx ruff@0.17.1 format --check .
+      - name: Unit tests
+        run: uv run pytest -q
+
+  image:
+    name: build, scan and push image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ inputs.context }}/Dockerfile
+          failure-threshold: warning
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg "GIT_SHA=${GITHUB_SHA::7}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${IMAGE}:${{ steps.meta.outputs.tag }}" \
+            "${{ inputs.context }}"
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image
+        if: github.event_name == 'push'
+        run: docker push "${IMAGE}:${{ steps.meta.outputs.tag }}"
+
+  deploy:
+    name: bump image tag in GitOps repo
+    needs: image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Serialise deploys of every service so two merges cannot race on the GitOps repo.
+    concurrency:
+      group: gitops-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Check out GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          path: gitops
+      - name: Update image tag
+        working-directory: gitops
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+        run: yq -i '.images[0].newTag = strenv(TAG)' "apps/${{ inputs.gitops_app }}/kustomization.yaml"
+      - name: Commit and push
+        working-directory: gitops
+        env:
+          TAG: ${{ needs.image.outputs.tag }}
+          APP: ${{ inputs.gitops_app }}
+        run: |
+          if git diff --quiet; then
+            echo "Tag already ${TAG}, nothing to deploy."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy(${APP}): ${TAG}" \
+            -m "Source: ${{ github.repository }}@${{ github.sha }}" \
+            -m "Triggered by: ${{ github.actor }}" \
+            -m "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((attempt * 3))
+          done
+          echo "Could not push after 3 attempts" >&2
+          exit 1
