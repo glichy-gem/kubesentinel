@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "infra/**"
+      - "chaos/**"
       - "Makefile"
       - ".github/workflows/infra.yml"
   push:
     branches: [main]
     paths:
       - "infra/**"
+      - "chaos/**"
       - "Makefile"
       - ".github/workflows/infra.yml"
 
@@ -38,3 +40,14 @@ jobs:
         run: kubectl kustomize infra/dashboards > /dev/null
       - name: Helm values render with the pinned chart versions
         run: make stack-template
+
+  chaos:
+    name: chaos runner and scenarios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # Unit tests for the runner, a check that every scenario folder is complete
+      # and only expects alerts that exist in the rule file, and shellcheck.
+      - name: Test the chaos runner and scenarios
+        run: make chaos-test

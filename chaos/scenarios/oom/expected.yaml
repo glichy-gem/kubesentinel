@@ -1,0 +1,13 @@
+name: oom
+description: Requests make orders-api exceed its memory limit; containers are OOMKilled.
+delivered_by: traffic # no deploy happened
+
+expected_alerts: [PodOOMKilled]
+acceptable_alerts: [PodCrashLooping, DeploymentReplicasMismatch, HighErrorRate]
+
+root_cause: memory_limit_too_low
+acceptable_root_causes: []
+expected_action: increase_memory_limit
+action_mode: approval
+
+timeout_seconds: 300

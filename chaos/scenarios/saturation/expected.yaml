@@ -1,0 +1,14 @@
+name: saturation
+description: A traffic spike on a CPU-heavy endpoint pushes p95 latency far above 500 ms.
+delivered_by: traffic
+
+expected_alerts: [HighLatencyP95]
+# Under CPU starvation probes can time out, so restarts and errors may follow.
+acceptable_alerts: [HighErrorRate, PodCrashLooping, DeploymentReplicasMismatch]
+
+root_cause: saturation
+acceptable_root_causes: []
+expected_action: scale_up
+action_mode: auto
+
+timeout_seconds: 600

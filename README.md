@@ -2,7 +2,7 @@
 
 AIOps for Kubernetes: turns a flood of alerts into **one incident** with a likely root cause, the evidence behind it, and a **safe, human-approved fix**.
 
-> Status: Phase 3 (observability) complete. The agent does not exist yet; this README describes the goals the project is built against.
+> Status: Phase 4 (failure injection) complete. The agent does not exist yet; this README describes the goals the project is built against.
 
 ## Problem
 
@@ -68,6 +68,8 @@ make stack          # install Prometheus, Alertmanager, Grafana, Loki, Alloy, ru
 make grafana-password  # print the generated Grafana admin password
 make test           # unit tests for orders-api (no cluster needed)
 make rules-test     # promtool check + unit tests for the alert rules
+make chaos S=oom    # inject one failure scenario, check its alerts, revert (see Failure scenarios)
+make chaos-test     # unit tests for the chaos runner + shellcheck (no cluster needed)
 make status         # show nodes and pods
 make down           # delete the cluster
 ```
@@ -148,12 +150,37 @@ namespace are in Loki and queryable as JSON, for example `{app="orders-api"} | j
 | HighErrorRate | 5xx above 5% for 2 minutes | critical |
 | HighLatencyP95 | p95 above 500 ms for 3 minutes | warning |
 | DeploymentReplicasMismatch | fewer available replicas than desired for 5 minutes | warning |
+| DeploymentRolloutStuck | not all replicas updated to the new version for 5 minutes | warning |
+| PodImagePullBackOff | a container cannot pull its image for 1 minute | critical |
 | PVCAlmostFull | volume above 85% for 5 minutes | warning |
 
 Alertmanager groups alerts by `namespace` and `service` and posts them to a webhook. Today that is a
 dummy receiver (`kubectl -n monitoring logs deploy/webhook-sink`); Phase 5 replaces it with the agent.
 Verified end to end: crashing `orders-api` by hand produced a `PodCrashLooping` notification at the
 webhook 78 seconds later.
+
+## Failure scenarios
+
+Each scenario in [`chaos/scenarios/`](chaos/scenarios/) has an `inject.sh`, a `revert.sh` and an
+`expected.yaml` answer key (alerts that must fire, root cause, expected action and approval mode).
+`make chaos S=<name>` waits for a healthy baseline, injects the fault, watches what reaches the
+Alertmanager webhook, always reverts, waits for recovery and writes a JSON result to `chaos/results/`.
+
+Release faults are delivered like real ones: a commit to `kubesentinel-gitops` that Argo CD rolls
+out, undone with `git revert`. See [ADR 6](docs/adr/0006-chaos-scenarios-as-data.md).
+
+| Scenario | Fault | Expected alert | Root cause / action | Detected | Recovered |
+|---|---|---|---|---|---|
+| bad-config | commit adds an invalid env var; new pods crash at startup | PodCrashLooping | bad release / rollback (approval) | 138 s | 21 s |
+| bad-image | commit deploys an image tag that does not exist | PodImagePullBackOff | image pull error / rollback (approval) | 101 s | 20 s |
+| oom | requests allocate memory past the 128 Mi limit | PodOOMKilled | memory limit too low / raise limit (approval) | 74 s | 1 s |
+| dependency-down | Redis scaled to 0 (Argo CD sync paused) | HighErrorRate | dependency down / restart it (approval) | 166 s | 7 s |
+| saturation | k6 Job, 20 users on a CPU-heavy endpoint | HighLatencyP95 | saturation / scale up (auto) | 273 s | 11 s |
+
+Measured on 2026-10-21, one run each, on the 8 GB laptop. Detection time is from injection to the
+alert reaching the webhook, so it includes rollout time, scrape and rule intervals, each rule's `for:`
+duration and Alertmanager `group_wait`. Recovery is from the start of the revert to every deployment
+ready, `/ready` returning 200 and Argo CD synced and healthy.
 
 ## Roadmap
 
@@ -163,7 +190,7 @@ webhook 78 seconds later.
 | 1 | 2 | Demo application (done) |
 | 2 | 3 | CI/CD with GitOps (done) |
 | 3 | 4-5 | Observability and alert rules (done) |
-| 4 | 6 | Failure injection framework |
+| 4 | 6 | Failure injection framework (done) |
 | 5 | 7-8 | The agent |
 | 6 | 9 | Testing and evaluation |
 | 7 | 10 | Documentation, demo, v1.0 |

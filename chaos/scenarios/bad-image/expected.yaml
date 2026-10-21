@@ -1,0 +1,13 @@
+name: bad-image
+description: A deploy references an image tag that does not exist; new pods cannot start.
+delivered_by: git
+
+expected_alerts: [PodImagePullBackOff]
+acceptable_alerts: [DeploymentRolloutStuck]
+
+root_cause: image_pull_error
+acceptable_root_causes: [bad_release]
+expected_action: rollback
+action_mode: approval
+
+timeout_seconds: 300
