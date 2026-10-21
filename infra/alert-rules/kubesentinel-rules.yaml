@@ -57,6 +57,38 @@ spec:
             summary: "{{ $labels.service }} has fewer available replicas than desired"
             description: "Deployment {{ $labels.deployment }} has had fewer available replicas than desired for 5 minutes."
 
+        # A bad rollout keeps the old pods serving (maxUnavailable rounds to 0 for
+        # 2 replicas), so DeploymentReplicasMismatch never fires. This catches a
+        # rollout whose new pods never become up to date.
+        - alert: DeploymentRolloutStuck
+          expr: |
+            label_replace(
+              kube_deployment_spec_replicas{namespace="demo"}
+              - kube_deployment_status_replicas_updated{namespace="demo"} > 0,
+              "service", "$1", "deployment", "(.+)"
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} rollout is stuck"
+            description: "Deployment {{ $labels.deployment }} has had replicas that are not on the latest revision for 5 minutes."
+
+        - alert: PodImagePullBackOff
+          expr: |
+            label_replace(
+              max by (namespace, pod, container) (
+                kube_pod_container_status_waiting_reason{namespace="demo", reason=~"ImagePullBackOff|ErrImagePull"}
+              ) == 1,
+              "service", "$1", "pod", "^(.+)-[a-z0-9]+-[a-z0-9]+$"
+            )
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} cannot pull its image"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} has been unable to pull its image for 1 minute."
+
     - name: kubesentinel.traffic
       rules:
         - alert: HighErrorRate

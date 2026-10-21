@@ -14,9 +14,10 @@ ALLOY_VERSION  ?= 1.14.0
 # Tools run as containers so nothing else needs installing (CI uses the same targets).
 PROM_IMAGE     ?= prom/prometheus:v3.5.0
 YQ_IMAGE       ?= mikefarah/yq:4.47.1
+SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test argocd argocd-status stack stack-template stack-status grafana-password rules-test
+.PHONY: cluster down status test argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -85,6 +86,18 @@ stack-status:
 
 grafana-password:
 	@kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+
+# Run one failure scenario end to end: make chaos S=oom
+# Scenarios live in chaos/scenarios/; results land in chaos/results/.
+chaos:
+	@test -n "$(S)" || (echo "usage: make chaos S=<scenario>   (scenarios: $$(ls chaos/scenarios | tr '\n' ' '))"; exit 2)
+	uv run chaos/run_scenario.py $(S)
+
+# Unit tests for the chaos runner and a consistency check of every scenario folder,
+# then shellcheck on the scenario scripts.
+chaos-test:
+	uv run --with pytest --with pyyaml pytest -q chaos/tests
+	docker run --rm -v $(CURDIR):/w -w /w $(SHELLCHECK_IMAGE) --severity=warning chaos/lib.sh $(wildcard chaos/scenarios/*/*.sh)
 
 # Validate the alert rules and run their unit tests with promtool.
 rules-test:

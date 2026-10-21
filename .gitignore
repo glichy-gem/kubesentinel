@@ -13,6 +13,7 @@ __pycache__/
 
 # tooling and data
 .tmp/
+chaos/results/
 *.sqlite
 *.db
 evals/results/*.csv

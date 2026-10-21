@@ -1,0 +1,15 @@
+name: bad-config
+description: A release adds an invalid setting; new pods crash loop at startup.
+delivered_by: git # a commit in kubesentinel-gitops, visible in the deploy history
+
+# Phase 4: alerts the runner checks.
+expected_alerts: [PodCrashLooping]
+acceptable_alerts: [DeploymentRolloutStuck]
+
+# Phase 5 and 6: what the agent should conclude and propose.
+root_cause: bad_release
+acceptable_root_causes: [config_invalid]
+expected_action: rollback
+action_mode: approval
+
+timeout_seconds: 420

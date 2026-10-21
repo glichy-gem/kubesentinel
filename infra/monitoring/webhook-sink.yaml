@@ -9,6 +9,7 @@ metadata:
 data:
   sink.py: |
     import json
+    from datetime import datetime, timezone
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -16,11 +17,15 @@ data:
         def do_POST(self):
             length = int(self.headers.get("content-length", 0))
             body = self.rfile.read(length)
+            # Arrival time is what the chaos runner uses to measure time to detect.
+            received_at = datetime.now(timezone.utc).isoformat()
             try:
                 payload = json.loads(body)
                 for alert in payload.get("alerts", []):
                     print(json.dumps({
                         "event": "alert",
+                        "received_at": received_at,
+                        "namespace": alert.get("labels", {}).get("namespace"),
                         "status": alert.get("status"),
                         "alertname": alert.get("labels", {}).get("alertname"),
                         "service": alert.get("labels", {}).get("service"),
@@ -30,6 +35,7 @@ data:
                     }), flush=True)
                 print(json.dumps({
                     "event": "batch",
+                    "received_at": received_at,
                     "status": payload.get("status"),
                     "groupLabels": payload.get("groupLabels"),
                     "alerts": len(payload.get("alerts", [])),

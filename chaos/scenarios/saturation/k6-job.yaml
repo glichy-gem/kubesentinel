@@ -1,0 +1,56 @@
+# Load generator for the saturation scenario. Runs in its own namespace so its
+# pods never show up in the demo namespace the alerts watch.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaos
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-saturation
+  namespace: chaos
+data:
+  script.js: |
+    import http from "k6/http";
+
+    // 20 virtual users hammering a CPU-heavy endpoint. Each request burns 150 ms
+    // of CPU, and orders-api has 2 replicas limited to 250m CPU each, so requests
+    // queue and latency climbs far above the 500 ms alert threshold.
+    export const options = {
+      stages: [
+        { duration: "1m", target: 20 },
+        { duration: "6m", target: 20 },
+        { duration: "30s", target: 0 },
+      ],
+    };
+
+    export default function () {
+      http.get("http://orders-api.demo.svc.cluster.local/chaos/cpu?ms=150", { timeout: "10s" });
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-saturation
+  namespace: chaos
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:2.2.0
+          args: ["run", "--quiet", "/scripts/script.js"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 192Mi }
+      volumes:
+        - name: script
+          configMap:
+            name: k6-saturation

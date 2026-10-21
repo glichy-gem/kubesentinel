@@ -1,0 +1,13 @@
+name: dependency-down
+description: Redis goes away; orders-api pods turn NotReady and requests fail.
+delivered_by: outage # no deploy happened
+
+expected_alerts: [HighErrorRate]
+acceptable_alerts: [DeploymentReplicasMismatch]
+
+root_cause: dependency_down
+acceptable_root_causes: []
+expected_action: restart_dependency
+action_mode: approval
+
+timeout_seconds: 420
