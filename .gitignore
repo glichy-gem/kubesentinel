@@ -12,6 +12,7 @@ __pycache__/
 .ruff_cache/
 
 # tooling and data
+.tmp/
 *.sqlite
 *.db
 evals/results/*.csv

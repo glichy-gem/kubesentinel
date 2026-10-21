@@ -1,0 +1,169 @@
+# Trimmed kube-prometheus-stack for a laptop with ~8 GB RAM (see ADR 5).
+# Every component has explicit memory limits. Nothing is persisted: this is a
+# lab cluster that is rebuilt from Git, so emptyDir is fine.
+
+# We ship our own alert rules (infra/alert-rules). The default rule set adds
+# ~150 rules we do not need and a lot of noise for a single-node kind cluster.
+defaultRules:
+  create: false
+
+# Scrape only what the agent needs. The control-plane components are not
+# reachable in kind and would show up as permanently down targets.
+kubeApiServer:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+coreDns:
+  enabled: false
+kubelet:
+  enabled: true # cAdvisor metrics: container CPU and memory
+nodeExporter:
+  enabled: false # node-level metrics are not needed for the v1 scenarios
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 96Mi }
+
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false # avoids the cert-patch jobs; fine for a local cluster
+  tls:
+    enabled: false
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 96Mi }
+  prometheusConfigReloader:
+    resources:
+      requests: { cpu: 5m, memory: 16Mi }
+      limits: { cpu: 50m, memory: 32Mi }
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30900 # mapped to localhost:9090 by infra/kind-config.yaml
+  prometheusSpec:
+    retention: 2d
+    retentionSize: 1GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    # Pick up every PodMonitor, ServiceMonitor and PrometheusRule in the cluster,
+    # not only ones labelled with this Helm release.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+alertmanager:
+  alertmanagerSpec:
+    retention: 24h
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { cpu: 50m, memory: 64Mi }
+  # All alerts go to one receiver, grouped so that related alerts for the same
+  # service arrive together. Phase 5 replaces the dummy sink with the agent.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: kubesentinel-agent
+      group_by: [namespace, service]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      # Helm merges maps but replaces lists. Without this the chart's default
+      # sub-route (receiver "null") survives, refers to a receiver we replaced,
+      # and the operator refuses to create Alertmanager at all.
+      routes: []
+    receivers:
+      - name: kubesentinel-agent
+        webhook_configs:
+          - url: http://webhook-sink.monitoring.svc.cluster.local:8080/alerts
+            send_resolved: true
+
+grafana:
+  # Pinned to the 11.6 line on purpose. Grafana 13 (the chart default) hung and
+  # used all 256 MiB on this 8 GB laptop: heavy unified-storage startup, slow
+  # plugin handling, liveness kills. 11.6 starts quickly in about half the memory.
+  # Trade-off: it is an older release. Acceptable here because Grafana is bound to
+  # localhost and holds no data we need to keep; revisit on a bigger machine.
+  image:
+    tag: "11.6.16"
+  # Password lives in a Secret created by `make stack`; it is never committed.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  service:
+    type: NodePort
+    nodePort: 30300 # mapped to localhost:3000 by infra/kind-config.yaml
+  defaultDashboardsEnabled: false # we provide three focused dashboards instead
+  grafana.ini:
+    # Grafana 13 downloads and installs several bundled plugins at startup. That
+    # made startup slow and pushed memory past the limit; we use none of them.
+    plugins:
+      preinstall_disabled: true
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+      check_for_plugin_updates: false
+    news:
+      news_feed_enabled: false
+  persistence:
+    enabled: false
+  # Grafana 13 loads many plugins at startup. A low CPU limit made that so slow
+  # that the liveness probe killed it, so the CPU limit is generous. The memory
+  # limit is what protects the node.
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: "1", memory: 256Mi }
+  # Grafana 13 needs 3 to 4 minutes to start on a loaded laptop (its API server
+  # registers many resource versions first). A tight liveness probe killed it
+  # seconds before it became ready, so the probe waits and only restarts a
+  # Grafana that has been unresponsive for about 10 minutes.
+  livenessProbe:
+    httpGet: { path: /api/health, port: 3000 }
+    initialDelaySeconds: 300
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 20
+  readinessProbe:
+    httpGet: { path: /api/health, port: 3000 }
+    initialDelaySeconds: 30
+    timeoutSeconds: 10
+  sidecar:
+    # One sidecar only: it watches ConfigMaps for dashboards. The datasource
+    # sidecar is off (it cost ~100 MB); datasources are provisioned from a file.
+    resources:
+      requests: { cpu: 5m, memory: 48Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+    datasources:
+      enabled: false
+      defaultDatasourceEnabled: false
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          access: proxy
+          url: http://kps-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          isDefault: true
+        - name: Loki
+          type: loki
+          uid: loki
+          access: proxy
+          url: http://loki.monitoring.svc.cluster.local:3100

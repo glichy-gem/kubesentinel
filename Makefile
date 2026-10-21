@@ -6,7 +6,17 @@ KIND_CONFIG    := infra/kind-config.yaml
 GITOPS_DIR     ?= ../kubesentinel-gitops
 ARGOCD_VERSION ?= v3.5.5
 
-.PHONY: cluster down status test argocd argocd-status
+# Observability stack, pinned so a rebuild gives the same cluster.
+KPS_VERSION    ?= 92.10.1
+LOKI_VERSION   ?= 7.3.0
+ALLOY_VERSION  ?= 1.14.0
+
+# Tools run as containers so nothing else needs installing (CI uses the same targets).
+PROM_IMAGE     ?= prom/prometheus:v3.5.0
+YQ_IMAGE       ?= mikefarah/yq:4.47.1
+RULES_TMP      := $(CURDIR)/.tmp/rules
+
+.PHONY: cluster down status test argocd argocd-status stack stack-template stack-status grafana-password rules-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -35,3 +45,51 @@ argocd:
 argocd-status:
 	kubectl -n argocd get applications
 	kubectl -n demo get pods
+
+# Install the observability stack: Prometheus, Alertmanager, Grafana, Loki, Alloy,
+# the dummy webhook receiver, alert rules and dashboards. Needs ~1 GB of free RAM.
+# The Grafana admin password is generated once and kept in a Secret, never in Git.
+stack:
+	kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+	kubectl -n monitoring get secret grafana-admin >/dev/null 2>&1 || \
+		kubectl -n monitoring create secret generic grafana-admin \
+			--from-literal=admin-user=admin \
+			--from-literal=admin-password="$$(openssl rand -base64 18 | tr -d '/+=')"
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+	helm repo add grafana https://grafana.github.io/helm-charts --force-update >/dev/null
+	helm repo update >/dev/null
+	helm upgrade --install kps prometheus-community/kube-prometheus-stack --version $(KPS_VERSION) \
+		-n monitoring -f infra/helm-values/kube-prometheus-stack.yaml --wait --timeout 15m
+	helm upgrade --install loki grafana/loki --version $(LOKI_VERSION) \
+		-n monitoring -f infra/helm-values/loki.yaml --wait --timeout 10m
+	helm upgrade --install alloy grafana/alloy --version $(ALLOY_VERSION) \
+		-n monitoring -f infra/helm-values/alloy.yaml --wait --timeout 5m
+	kubectl apply -f infra/monitoring/
+	kubectl apply -f infra/alert-rules/kubesentinel-rules.yaml
+	kubectl apply --server-side --force-conflicts -k infra/dashboards
+
+# Render every chart with our values and pinned versions, without a cluster.
+# Catches typos in values files; CI runs it on every infra change.
+stack-template:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+	helm repo add grafana https://grafana.github.io/helm-charts --force-update >/dev/null
+	helm repo update >/dev/null
+	helm template kps prometheus-community/kube-prometheus-stack --version $(KPS_VERSION) -n monitoring -f infra/helm-values/kube-prometheus-stack.yaml >/dev/null
+	helm template loki grafana/loki --version $(LOKI_VERSION) -n monitoring -f infra/helm-values/loki.yaml >/dev/null
+	helm template alloy grafana/alloy --version $(ALLOY_VERSION) -n monitoring -f infra/helm-values/alloy.yaml >/dev/null
+	@echo "all charts render"
+
+stack-status:
+	kubectl -n monitoring get pods
+	kubectl -n monitoring get prometheusrules,podmonitors
+
+grafana-password:
+	@kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+
+# Validate the alert rules and run their unit tests with promtool.
+rules-test:
+	mkdir -p $(RULES_TMP)
+	docker run --rm -v $(CURDIR)/infra/alert-rules:/w $(YQ_IMAGE) '.spec' /w/kubesentinel-rules.yaml > $(RULES_TMP)/rules.yaml
+	cp infra/alert-rules/tests/rules_test.yaml $(RULES_TMP)/rules_test.yaml
+	docker run --rm -v $(RULES_TMP):/w --entrypoint promtool $(PROM_IMAGE) check rules /w/rules.yaml
+	docker run --rm -v $(RULES_TMP):/w --entrypoint promtool $(PROM_IMAGE) test rules /w/rules_test.yaml

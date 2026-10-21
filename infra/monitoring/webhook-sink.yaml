@@ -1,0 +1,110 @@
+# Dummy Alertmanager receiver for Phase 3. It prints one JSON line per alert so
+# you can prove alerts arrive: kubectl -n monitoring logs deploy/webhook-sink
+# Phase 5 replaces it with the KubeSentinel agent's /alerts endpoint.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-sink-script
+  namespace: monitoring
+data:
+  sink.py: |
+    import json
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("content-length", 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body)
+                for alert in payload.get("alerts", []):
+                    print(json.dumps({
+                        "event": "alert",
+                        "status": alert.get("status"),
+                        "alertname": alert.get("labels", {}).get("alertname"),
+                        "service": alert.get("labels", {}).get("service"),
+                        "severity": alert.get("labels", {}).get("severity"),
+                        "summary": alert.get("annotations", {}).get("summary"),
+                        "startsAt": alert.get("startsAt"),
+                    }), flush=True)
+                print(json.dumps({
+                    "event": "batch",
+                    "status": payload.get("status"),
+                    "groupLabels": payload.get("groupLabels"),
+                    "alerts": len(payload.get("alerts", [])),
+                }), flush=True)
+            except (ValueError, AttributeError) as exc:
+                print(json.dumps({"event": "bad_payload", "error": str(exc)}), flush=True)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+
+    HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-sink
+  namespace: monitoring
+  labels:
+    app: webhook-sink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook-sink
+  template:
+    metadata:
+      labels:
+        app: webhook-sink
+    spec:
+      containers:
+        - name: sink
+          image: python:3.12-slim
+          command: ["python", "/app/sink.py"]
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 48Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: script
+          configMap:
+            name: webhook-sink-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-sink
+  namespace: monitoring
+  labels:
+    app: webhook-sink
+spec:
+  selector:
+    app: webhook-sink
+  ports:
+    - port: 8080
+      targetPort: 8080
