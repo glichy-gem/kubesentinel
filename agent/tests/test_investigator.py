@@ -8,7 +8,7 @@ from test_rca import reply
 
 from app.config import Settings
 from app.db import SCHEMA, Database
-from app.investigator import Investigator
+from app.investigator import Investigator, symptom_start
 from app.main import create_app
 from app.matcher import load_signatures
 
@@ -67,6 +67,22 @@ def test_a_new_symptom_triggers_a_second_investigation(tmp_path):
     investigator._pool.shutdown(wait=True)
     assert len(llm.prompts) == 2
     assert "PodOOMKilled" in llm.prompts[1]
+
+
+def test_evidence_windows_follow_the_current_symptoms_not_the_first_alert():
+    incident = {
+        "first_alert_at": "2026-10-21T20:04:00.000+00:00",
+        "alerts": [
+            {"status": "resolved", "starts_at": "2026-10-21T20:04:00.000+00:00"},
+            {"status": "firing", "starts_at": "2026-10-21T20:40:23.000+00:00"},
+            {"status": "firing", "starts_at": "2026-10-21T20:41:00.000+00:00"},
+        ],
+    }
+    assert symptom_start(incident).isoformat() == "2026-10-21T20:40:23+00:00"
+    incident["alerts"] = [
+        {"status": "resolved", "starts_at": "2026-10-21T20:09:00.000+00:00"}
+    ]
+    assert symptom_start(incident).isoformat() == "2026-10-21T20:04:00+00:00"
 
 
 def test_reinvestigate_endpoint(tmp_path):
