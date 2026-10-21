@@ -39,6 +39,7 @@ def deployment(
                 "spec": {
                     "containers": [
                         {
+                            "name": name,
                             "image": image,
                             "resources": {"limits": {"memory": "128Mi"}},
                             "env": [

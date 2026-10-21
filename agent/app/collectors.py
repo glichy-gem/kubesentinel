@@ -316,3 +316,5 @@ class Collector:
             )
             if ev.signals.minutes_since_deploy is None:  # newest first
                 ev.signal("minutes_since_deploy", round(minutes, 1), fact)
+                ev.signal("suspect_revision", revision, fact)
+                ev.signal("suspect_message", message[:120], fact)

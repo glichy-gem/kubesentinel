@@ -1,0 +1,54 @@
+# Remediation policy (design doc section 6.6). Code enforces this file; the LLM
+# only proposes. An action type that is not listed here can never run.
+#
+# mode: auto      runs without a human, within the limits below
+#       approval  runs only after a human approves it in Telegram (or the API)
+#       none      nothing to do
+#
+# Never allowed, by construction: deleting resources other than single pods,
+# changing RBAC, touching namespaces other than those listed, editing secrets.
+
+namespaces: [demo] # the only namespace any action may touch
+
+# Below this confidence an "auto" action is downgraded to "approval".
+min_auto_confidence: 0.7
+
+approval_ttl_minutes: 15
+
+circuit_breaker:
+  verify_minutes: 5 # how long a fix gets to show recovery
+  pause_minutes: 60 # after a failed fix, no auto actions for that service
+
+actions:
+  restart_pod:
+    risk: low
+    mode: auto
+    max_per_incident: 1
+    max_per_hour_per_service: 3
+
+  scale_up:
+    risk: low
+    mode: auto
+    step: 1
+    max_replicas: 4
+    max_per_hour_per_service: 2
+
+  increase_memory_limit:
+    risk: medium
+    mode: approval
+    factor: 2
+    max_memory_mi: 512
+
+  rollback:
+    risk: medium
+    mode: approval
+    # Only a deploy this close before the symptoms is a credible suspect.
+    max_minutes_before_symptoms: 30
+
+  restart_dependency:
+    risk: medium
+    mode: approval
+
+  none:
+    risk: none
+    mode: none

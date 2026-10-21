@@ -9,12 +9,36 @@ class FakeKube:
     def __init__(self, responses: dict[str, dict]) -> None:
         self.responses = responses
         self.calls: list[str] = []
+        self.writes: list[tuple] = []
 
     def get(self, path: str, **params) -> dict:
         self.calls.append(path)
         if path not in self.responses:
             raise RuntimeError(f"404 {path}")
         return self.responses[path]
+
+    def delete(self, path: str) -> None:
+        self.writes.append(("delete", path))
+
+    def merge_patch(self, path: str, body: dict) -> dict:
+        self.writes.append(("patch", path, body))
+        return {}
+
+
+class FakeNotifier:
+    def __init__(self) -> None:
+        self.cards: list[tuple] = []
+        self.follow_ups: list[str] = []
+        self.closed: list[tuple] = []
+
+    def incident_card(self, incident, action, token) -> None:
+        self.cards.append((incident["id"], action["id"], action["mode"], token))
+
+    def follow_up(self, incident, action) -> None:
+        self.follow_ups.append(action["status"])
+
+    def close_card(self, action, note) -> None:
+        self.closed.append((action["id"], note))
 
 
 class FakePrometheus:

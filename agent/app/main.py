@@ -1,32 +1,85 @@
 import logging
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel, Field
 
 from app.clients import GitHubClient, KubeClient, LokiClient, PrometheusClient
 from app.collectors import Collector
 from app.config import Settings
 from app.correlator import Correlator
 from app.db import Database
+from app.executor import Executor, GitOpsRepo
 from app.investigator import Investigator
 from app.llm import GeminiProvider
 from app.logging_config import configure_logging
 from app.matcher import load_signatures
 from app.metrics import ALERTS_RECEIVED, INCIDENT_EVENTS, INCIDENTS
 from app.models import AlertmanagerPayload
+from app.policy import load_policy
+from app.remediation import Planner, Responder
+from app.telegram import Approvals, Notifier, Poller, TelegramClient
 
 logger = logging.getLogger("kubesentinel")
 
 IncidentStatus = Literal["open", "resolved", "closed"]
 
 
+class ApprovalIn(BaseModel):
+    token: str = Field(min_length=8, max_length=64)
+    by: str = Field(default="api", max_length=64)
+
+
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def build_investigator(settings: Settings, db: Database) -> Investigator:
+@dataclass
+class Remediation:
+    responder: Responder
+    executor: Executor
+    approvals: Approvals
+    poller: Poller | None
+
+
+def build_remediation(
+    settings: Settings, db: Database, kube: KubeClient
+) -> Remediation:
+    policy = load_policy()
+    notifier = client = None
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        client = TelegramClient(settings.telegram_bot_token.get_secret_value())
+        notifier = Notifier(client, settings.telegram_chat_id, db)
+    gitops = None
+    key_dir = Path(settings.git_key_dir)
+    if (key_dir / "id_ed25519").exists():
+        gitops = GitOpsRepo(
+            settings.gitops_ssh_url,
+            key_dir,
+            Path(settings.workdir),
+            "KubeSentinel agent",
+        )
+    executor = Executor(db, kube, gitops, policy, notifier)
+    approvals = Approvals(db, executor.submit, notifier)
+    responder = Responder(
+        db,
+        Planner(kube, policy, settings.gitops_repo),
+        policy,
+        notifier,
+        executor.submit,
+    )
+    poller = Poller(client, settings.telegram_chat_id, approvals) if client else None
+    return Remediation(responder, executor, approvals, poller)
+
+
+def build_investigator(
+    settings: Settings, db: Database, kube: KubeClient, responder: Responder | None
+) -> Investigator:
     provider = (
         GeminiProvider(
             settings.gemini_api_key.get_secret_value(),
@@ -37,7 +90,7 @@ def build_investigator(settings: Settings, db: Database) -> Investigator:
         else None
     )
     collector = Collector(
-        KubeClient(settings.k8s_url),
+        kube,
         PrometheusClient(settings.prometheus_url),
         LokiClient(settings.loki_url),
         GitHubClient(),
@@ -51,22 +104,39 @@ def build_investigator(settings: Settings, db: Database) -> Investigator:
         provider,
         settings.dependencies,
         settings.investigate_delay_seconds,
+        responder,
     )
 
 
 def create_app(
-    settings: Settings | None = None, investigator: Investigator | None = None
+    settings: Settings | None = None,
+    investigator: Investigator | None = None,
+    remediation: Remediation | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI(title="kubesentinel-agent")
     db = Database(settings.db_path)
     correlator = Correlator(db, settings.quiet_minutes_to_close)
     if investigator is None and settings.investigate:
-        investigator = build_investigator(settings, db)
+        kube = KubeClient(settings.k8s_url)
+        if remediation is None and settings.remediate:
+            remediation = build_remediation(settings, db, kube)
+        responder = remediation.responder if remediation else None
+        investigator = build_investigator(settings, db, kube, responder)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if remediation and remediation.poller:
+            remediation.poller.start()
+        yield
+        if remediation and remediation.poller:
+            remediation.poller.stop()
+
+    app = FastAPI(title="kubesentinel-agent", lifespan=lifespan)
     app.state.db = db
     app.state.investigator = investigator
+    app.state.remediation = remediation
     logger.info(
         "agent started",
         extra={
@@ -74,6 +144,9 @@ def create_app(
                 "version": settings.version,
                 "investigate": investigator is not None,
                 "llm": settings.gemini_models if settings.gemini_api_key else None,
+                "remediate": remediation is not None,
+                "telegram": bool(remediation and remediation.poller),
+                "gitops_write": bool(remediation and remediation.executor.gitops),
             }
         },
     )
@@ -155,5 +228,26 @@ def create_app(
             raise HTTPException(status_code=404, detail="incident not found")
         investigator.submit(incident_id, delay_seconds=0)
         return {"incident_id": incident_id, "status": "queued"}
+
+    @app.get("/actions")
+    def list_actions(
+        incident_id: int | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> list[dict]:
+        return db.list_actions(incident_id, limit)
+
+    @app.post("/actions/{action_id}/{decision}")
+    def decide_action(
+        action_id: int, decision: Literal["approve", "reject"], body: ApprovalIn
+    ) -> dict:
+        """The same approval path as the Telegram buttons, for scripts and evals."""
+        if remediation is None:
+            raise HTTPException(status_code=503, detail="remediation is disabled")
+        message = remediation.approvals.decide(
+            action_id, body.token, decision == "approve", body.by
+        )
+        if message.startswith("Not applied"):
+            raise HTTPException(status_code=409, detail=message)
+        return {"action_id": action_id, "result": message}
 
     return app

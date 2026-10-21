@@ -4,6 +4,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 CLUSTER_NAME   := kubesentinel
 KIND_CONFIG    := infra/kind-config.yaml
 GITOPS_DIR     ?= ../kubesentinel-gitops
+GITOPS_REPO    ?= glichy-gem/kubesentinel-gitops
 ARGOCD_VERSION ?= v3.5.5
 
 # Observability stack, pinned so a rebuild gives the same cluster.
@@ -17,7 +18,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test agent-test agent-secret argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
+.PHONY: cluster down status test agent-test agent-secret agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -54,6 +55,29 @@ agent-secret:
 	rc=$$?; rm -f .tmp/agent.env; exit $$rc
 	@# Deleting the pod (not `rollout restart`) avoids a template change that Argo CD would see as drift.
 	-kubectl -n kubesentinel delete pod -l app=kubesentinel-agent --wait=false
+
+# Give the agent write access to the GitOps repo, and nothing else: a fresh SSH
+# deploy key for that one repo (any older agent key is removed, so running this
+# again rotates it). The private key goes straight into a Secret and is shredded
+# locally. GitHub's host keys come from its API over TLS, not from ssh-keyscan.
+agent-git-key:
+	@set -e; umask 077; rm -rf .tmp/gitkey; mkdir -p .tmp/gitkey; \
+	trap 'shred -u .tmp/gitkey/id_ed25519 2>/dev/null; rm -rf .tmp/gitkey' EXIT; \
+	ssh-keygen -q -t ed25519 -N '' -C kubesentinel-agent -f .tmp/gitkey/id_ed25519; \
+	curl -fsS https://api.github.com/meta \
+	  | python3 -c 'import json,sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' \
+	  > .tmp/gitkey/known_hosts; \
+	for id in $$(gh repo deploy-key list -R $(GITOPS_REPO) --json id,title \
+	    --jq '.[] | select(.title == "kubesentinel-agent") | .id'); do \
+	  gh repo deploy-key delete "$$id" -R $(GITOPS_REPO); \
+	done; \
+	gh repo deploy-key add .tmp/gitkey/id_ed25519.pub -R $(GITOPS_REPO) \
+	  --title kubesentinel-agent --allow-write; \
+	kubectl create namespace kubesentinel --dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
+	kubectl -n kubesentinel create secret generic kubesentinel-agent-git \
+	  --from-file=id_ed25519=.tmp/gitkey/id_ed25519 \
+	  --from-file=known_hosts=.tmp/gitkey/known_hosts --dry-run=client -o yaml \
+	  | kubectl apply --server-side --field-manager=make-agent-git-key -f -
 
 # Install Argo CD (core, no UI) and hand it the GitOps repo. After this, every
 # deploy is a commit to kubesentinel-gitops; the demo app appears on its own.

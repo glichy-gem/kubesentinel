@@ -20,6 +20,11 @@ DIAGNOSES = Counter(
     "Diagnoses produced, by who produced them (llm or matcher fallback) and root cause",
     ["source", "root_cause"],
 )
+ACTIONS = Counter(
+    "kubesentinel_actions_total",
+    "Remediation actions by type and outcome",
+    ["type", "outcome"],
+)
 INVESTIGATION_SECONDS = Histogram(
     "kubesentinel_investigation_seconds",
     "Time from starting evidence collection to a stored diagnosis",

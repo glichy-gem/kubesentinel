@@ -43,6 +43,7 @@ class Investigator:
         provider: LLMProvider | None,
         dependencies: dict[str, list[str]],
         delay_seconds: float,
+        responder=None,  # app.remediation.Responder; None = diagnose only
     ) -> None:
         self.db = db
         self.collector = collector
@@ -50,6 +51,7 @@ class Investigator:
         self.provider = provider
         self.dependencies = dependencies
         self.delay_seconds = delay_seconds
+        self.responder = responder
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="investigate")
 
     def submit(self, incident_id: int, delay_seconds: float | None = None) -> Future:
@@ -82,7 +84,7 @@ class Investigator:
         result = diagnose(incident, evidence, candidates, self.provider, dependencies)
         d = result.diagnosis
 
-        self.db.save_diagnosis(
+        diagnosis_id = self.db.save_diagnosis(
             incident_id,
             {
                 "incident_id": incident_id,
@@ -127,4 +129,12 @@ class Investigator:
                 }
             },
         )
+        if self.responder is not None:
+            self.responder.respond(
+                self.db.get_incident(incident_id),
+                diagnosis_id,
+                d,
+                evidence.signals,
+                evidence,
+            )
         return result
