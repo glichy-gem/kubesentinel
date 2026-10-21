@@ -80,6 +80,10 @@ alertmanager:
       group_wait: 10s
       group_interval: 1m
       repeat_interval: 1h
+      # Helm merges maps but replaces lists. Without this the chart's default
+      # sub-route (receiver "null") survives, refers to a receiver we replaced,
+      # and the operator refuses to create Alertmanager at all.
+      routes: []
     receivers:
       - name: kubesentinel-agent
         webhook_configs:
@@ -87,6 +91,13 @@ alertmanager:
             send_resolved: true
 
 grafana:
+  # Pinned to the 11.6 line on purpose. Grafana 13 (the chart default) hung and
+  # used all 256 MiB on this 8 GB laptop: heavy unified-storage startup, slow
+  # plugin handling, liveness kills. 11.6 starts quickly in about half the memory.
+  # Trade-off: it is an older release. Acceptable here because Grafana is bound to
+  # localhost and holds no data we need to keep; revisit on a bigger machine.
+  image:
+    tag: "11.6.16"
   # Password lives in a Secret created by `make stack`; it is never committed.
   admin:
     existingSecret: grafana-admin
@@ -96,6 +107,17 @@ grafana:
     type: NodePort
     nodePort: 30300 # mapped to localhost:3000 by infra/kind-config.yaml
   defaultDashboardsEnabled: false # we provide three focused dashboards instead
+  grafana.ini:
+    # Grafana 13 downloads and installs several bundled plugins at startup. That
+    # made startup slow and pushed memory past the limit; we use none of them.
+    plugins:
+      preinstall_disabled: true
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+      check_for_plugin_updates: false
+    news:
+      news_feed_enabled: false
   persistence:
     enabled: false
   # Grafana 13 loads many plugins at startup. A low CPU limit made that so slow
@@ -104,11 +126,16 @@ grafana:
   resources:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: "1", memory: 256Mi }
+  # Grafana 13 needs 3 to 4 minutes to start on a loaded laptop (its API server
+  # registers many resource versions first). A tight liveness probe killed it
+  # seconds before it became ready, so the probe waits and only restarts a
+  # Grafana that has been unresponsive for about 10 minutes.
   livenessProbe:
     httpGet: { path: /api/health, port: 3000 }
-    initialDelaySeconds: 90
+    initialDelaySeconds: 300
+    periodSeconds: 15
     timeoutSeconds: 10
-    failureThreshold: 10
+    failureThreshold: 20
   readinessProbe:
     httpGet: { path: /api/health, port: 3000 }
     initialDelaySeconds: 30

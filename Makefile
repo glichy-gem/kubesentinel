@@ -16,7 +16,7 @@ PROM_IMAGE     ?= prom/prometheus:v3.5.0
 YQ_IMAGE       ?= mikefarah/yq:4.47.1
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test argocd argocd-status stack stack-status grafana-password rules-test
+.PHONY: cluster down status test argocd argocd-status stack stack-template stack-status grafana-password rules-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -67,6 +67,17 @@ stack:
 	kubectl apply -f infra/monitoring/
 	kubectl apply -f infra/alert-rules/kubesentinel-rules.yaml
 	kubectl apply --server-side --force-conflicts -k infra/dashboards
+
+# Render every chart with our values and pinned versions, without a cluster.
+# Catches typos in values files; CI runs it on every infra change.
+stack-template:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+	helm repo add grafana https://grafana.github.io/helm-charts --force-update >/dev/null
+	helm repo update >/dev/null
+	helm template kps prometheus-community/kube-prometheus-stack --version $(KPS_VERSION) -n monitoring -f infra/helm-values/kube-prometheus-stack.yaml >/dev/null
+	helm template loki grafana/loki --version $(LOKI_VERSION) -n monitoring -f infra/helm-values/loki.yaml >/dev/null
+	helm template alloy grafana/alloy --version $(ALLOY_VERSION) -n monitoring -f infra/helm-values/alloy.yaml >/dev/null
+	@echo "all charts render"
 
 stack-status:
 	kubectl -n monitoring get pods

@@ -7,7 +7,8 @@ controller:
 alloy:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
-    limits: { cpu: 200m, memory: 160Mi }
+    # 200m throttled Alloy 90% of the time and failed its readiness probe.
+    limits: { cpu: 500m, memory: 160Mi }
   configMap:
     content: |
       discovery.kubernetes "pods" {

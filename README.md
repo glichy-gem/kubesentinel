@@ -2,7 +2,7 @@
 
 AIOps for Kubernetes: turns a flood of alerts into **one incident** with a likely root cause, the evidence behind it, and a **safe, human-approved fix**.
 
-> Status: Phase 2 (CI/CD with GitOps) complete. The agent does not exist yet; this README describes the goals the project is built against.
+> Status: Phase 3 (observability) complete. The agent does not exist yet; this README describes the goals the project is built against.
 
 ## Problem
 
@@ -64,10 +64,16 @@ Requires WSL2 with Docker Engine, `kind`, `kubectl`, `uv` and `make`, plus a clo
 make cluster        # create the local kind cluster
 make argocd         # install Argo CD (core) and point it at the GitOps repo
 make argocd-status  # show Argo CD applications and the demo pods
+make stack          # install Prometheus, Alertmanager, Grafana, Loki, Alloy, rules, dashboards
+make grafana-password  # print the generated Grafana admin password
 make test           # unit tests for orders-api (no cluster needed)
+make rules-test     # promtool check + unit tests for the alert rules
 make status         # show nodes and pods
 make down           # delete the cluster
 ```
+
+`make stack` needs about 1 GB of free memory on top of the cluster: close the browser and other
+large apps first on an 8 GB machine (see [ADR 5](docs/adr/0005-observability-stack-on-8gb.md)).
 
 After `make argocd`, Argo CD pulls the pinned image from GHCR and the demo app appears on its own
 (allow a minute for the first sync).
@@ -125,6 +131,30 @@ push to main -> CI: ruff + pytest -> build image -> hadolint + Trivy -> push ghc
 
 See [ADR 4](docs/adr/0004-gitops-with-two-repos-and-argocd-core.md) for the reasoning and trade-offs.
 
+## Observability
+
+| URL (localhost only) | What |
+|---|---|
+| http://localhost:3000 | Grafana (user `admin`, password from `make grafana-password`) |
+| http://localhost:9090 | Prometheus (targets, rules, alerts) |
+
+Dashboards: **Service health (RED)**, **Cluster health**, **Incidents**. Logs from the `demo`
+namespace are in Loki and queryable as JSON, for example `{app="orders-api"} | json | level="ERROR"`.
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| PodCrashLooping | more than 3 restarts in 5 minutes | critical |
+| PodOOMKilled | last termination was OOMKilled and the pod restarted | critical |
+| HighErrorRate | 5xx above 5% for 2 minutes | critical |
+| HighLatencyP95 | p95 above 500 ms for 3 minutes | warning |
+| DeploymentReplicasMismatch | fewer available replicas than desired for 5 minutes | warning |
+| PVCAlmostFull | volume above 85% for 5 minutes | warning |
+
+Alertmanager groups alerts by `namespace` and `service` and posts them to a webhook. Today that is a
+dummy receiver (`kubectl -n monitoring logs deploy/webhook-sink`); Phase 5 replaces it with the agent.
+Verified end to end: crashing `orders-api` by hand produced a `PodCrashLooping` notification at the
+webhook 78 seconds later.
+
 ## Roadmap
 
 | Phase | Weeks | Content |
@@ -132,7 +162,7 @@ See [ADR 4](docs/adr/0004-gitops-with-two-repos-and-argocd-core.md) for the reas
 | 0 | 1 | Planning and setup (done) |
 | 1 | 2 | Demo application (done) |
 | 2 | 3 | CI/CD with GitOps (done) |
-| 3 | 4-5 | Observability and alert rules |
+| 3 | 4-5 | Observability and alert rules (done) |
 | 4 | 6 | Failure injection framework |
 | 5 | 7-8 | The agent |
 | 6 | 9 | Testing and evaluation |

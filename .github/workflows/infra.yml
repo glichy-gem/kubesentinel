@@ -1,0 +1,40 @@
+name: infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "Makefile"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "Makefile"
+      - ".github/workflows/infra.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  alert-rules:
+    name: alert rules (promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same target as local development: yq extracts the rule groups,
+      # promtool checks them and runs the unit tests.
+      - name: Check and unit-test alert rules
+        run: make rules-test
+
+  manifests:
+    name: dashboards and manifests render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dashboards are valid JSON
+        run: for f in infra/dashboards/*.json; do jq -e . "$f" > /dev/null && echo "ok $f"; done
+      - name: Dashboard kustomization renders
+        run: kubectl kustomize infra/dashboards > /dev/null
+      - name: Helm values render with the pinned chart versions
+        run: make stack-template

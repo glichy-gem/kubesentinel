@@ -31,6 +31,15 @@ singleBinary:
   replicas: 1
   persistence:
     enabled: false
+  # With persistence off the chart mounts nothing at /var/loki, and the root
+  # filesystem is read-only, so Loki crashed with "mkdir /var/loki: read-only
+  # file system". A scratch volume gives it somewhere to write.
+  extraVolumes:
+    - name: loki-data
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: loki-data
+      mountPath: /var/loki
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 300m, memory: 256Mi }
