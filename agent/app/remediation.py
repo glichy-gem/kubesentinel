@@ -23,6 +23,8 @@ from app.policy import Decision, History, Policy, decide
 
 logger = logging.getLogger("kubesentinel.remediation")
 
+ARGO_APPS = "/apis/argoproj.io/v1alpha1/namespaces/argocd/applications"
+
 QUANTITY = re.compile(r"^(\d+)(Mi|Gi|M|G)?$")
 TO_MI = {
     "Mi": 1,
@@ -166,6 +168,21 @@ class Planner:
                 "git",
                 "",
                 error=f"the last deploy was {minutes:.0f} min before the symptoms; too old to blame",
+            )
+        # Only revert what is still running. Found live: a stale diagnosis proposed
+        # reverting a commit that had already been reverted half an hour earlier.
+        app = self.kube.get(f"{ARGO_APPS}/{target}")
+        history = app.get("status", {}).get("history", [])
+        latest = max(history, key=lambda h: h.get("deployedAt", ""), default={})
+        if latest.get("revision") != revision:
+            return Plan(
+                "rollback",
+                target,
+                namespace,
+                "git",
+                "",
+                error=f"{revision[:7]} is no longer the latest deploy of {target}"
+                f" (now {latest.get('revision', '')[:7] or 'unknown'}); nothing to roll back",
             )
         return Plan(
             "rollback",

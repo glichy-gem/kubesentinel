@@ -24,6 +24,11 @@ class Settings(BaseSettings):
         "http://kps-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
     )
     loki_url: str = "http://loki.monitoring.svc.cluster.local:3100"
+    # Source of truth for what is firing; empty disables reconciliation.
+    alertmanager_url: str = "http://kps-kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093"
+    reconcile_seconds: float = 60
+    # A recurring alert in a long-open incident is investigated again after this long.
+    reinvestigate_after_minutes: float = 10
     gitops_repo: str = "glichy-gem/kubesentinel-gitops"
     # Small service map: what each service needs to work. JSON in the env var.
     dependencies: dict[str, list[str]] = {"orders-api": ["redis"]}

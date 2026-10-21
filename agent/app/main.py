@@ -9,7 +9,13 @@ from fastapi import FastAPI, HTTPException, Query, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
-from app.clients import GitHubClient, KubeClient, LokiClient, PrometheusClient
+from app.clients import (
+    AlertmanagerClient,
+    GitHubClient,
+    KubeClient,
+    LokiClient,
+    PrometheusClient,
+)
 from app.collectors import Collector
 from app.config import Settings
 from app.correlator import Correlator
@@ -22,6 +28,7 @@ from app.matcher import load_signatures
 from app.metrics import ALERTS_RECEIVED, INCIDENT_EVENTS, INCIDENTS
 from app.models import AlertmanagerPayload
 from app.policy import load_policy
+from app.reconciler import Reconciler
 from app.remediation import Planner, Responder
 from app.telegram import Approvals, Notifier, Poller, TelegramClient
 
@@ -125,13 +132,30 @@ def create_app(
         responder = remediation.responder if remediation else None
         investigator = build_investigator(settings, db, kube, responder)
 
+    def refresh_gauges() -> None:
+        counts = db.count_by_status()
+        for status in ("open", "resolved", "closed"):
+            INCIDENTS.labels(status).set(counts.get(status, 0))
+
+    reconciler = (
+        Reconciler(
+            AlertmanagerClient(settings.alertmanager_url),
+            correlator,
+            settings.reconcile_seconds,
+            refresh_gauges,
+        )
+        if settings.alertmanager_url
+        else None
+    )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if remediation and remediation.poller:
-            remediation.poller.start()
+        background = [t for t in (reconciler, remediation and remediation.poller) if t]
+        for thread in background:
+            thread.start()
         yield
-        if remediation and remediation.poller:
-            remediation.poller.stop()
+        for thread in background:
+            thread.stop()
 
     app = FastAPI(title="kubesentinel-agent", lifespan=lifespan)
     app.state.db = db
@@ -147,14 +171,27 @@ def create_app(
                 "remediate": remediation is not None,
                 "telegram": bool(remediation and remediation.poller),
                 "gitops_write": bool(remediation and remediation.executor.gitops),
+                "reconcile": reconciler is not None,
             }
         },
     )
 
-    def refresh_gauges() -> None:
-        counts = db.count_by_status()
-        for status in ("open", "resolved", "closed"):
-            INCIDENTS.labels(status).set(counts.get(status, 0))
+    def should_investigate(change) -> bool:
+        """New incident, flapping, or a new kind of symptom; or a recurrence after a while.
+
+        The last case covers an incident that stays open across separate failures:
+        its diagnosis is stale, so a fresh firing of a known alert gets a fresh look.
+        """
+        if change.needs_investigation:
+            return True
+        if not change.recurrences or change.event == "resolved":
+            return False
+        incident = db.get_incident(change.incident_id)
+        last = incident and incident.get("diagnosed_at")
+        if not last:
+            return True
+        age = now_utc() - datetime.fromisoformat(last)
+        return age.total_seconds() > settings.reinvestigate_after_minutes * 60
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -183,8 +220,7 @@ def create_app(
         changes = correlator.ingest(payload, now_utc())
         for change in changes:
             INCIDENT_EVENTS.labels(change.event).inc()
-            # A new incident, a flapping one, or a new kind of symptom: look (again).
-            if change.needs_investigation and investigator is not None:
+            if investigator is not None and should_investigate(change):
                 investigator.submit(change.incident_id)
             logger.info(
                 "incident %s",

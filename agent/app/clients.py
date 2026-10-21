@@ -70,6 +70,17 @@ class PrometheusClient:
         return None if math.isnan(value) else value  # NaN (0/0) means "no data"
 
 
+class AlertmanagerClient:
+    def __init__(self, base_url: str, timeout: float = 10) -> None:
+        self._client = httpx.Client(base_url=base_url, timeout=timeout)
+
+    def active_alerts(self) -> list[dict]:
+        """Every alert Alertmanager considers firing (silenced or inhibited included)."""
+        response = self._client.get("/api/v2/alerts", params={"active": "true"})
+        response.raise_for_status()
+        return response.json()
+
+
 class LokiClient:
     def __init__(self, base_url: str, timeout: float = 10) -> None:
         self._client = httpx.Client(base_url=base_url, timeout=timeout)

@@ -1,5 +1,8 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 
+import pytest
 from conftest import T0, am_alert, am_payload
 from fakes import FakeLLM
 from fastapi.testclient import TestClient
@@ -13,8 +16,12 @@ from app.main import create_app
 from app.matcher import load_signatures
 
 
-def make_client(tmp_path, llm) -> TestClient:
-    settings = Settings(db_path=str(tmp_path / "agent.db"))
+def make_client(tmp_path, llm, reinvestigate_after_minutes=10) -> TestClient:
+    settings = Settings(
+        db_path=str(tmp_path / "agent.db"),
+        alertmanager_url="",
+        reinvestigate_after_minutes=reinvestigate_after_minutes,
+    )
     kube = cluster(
         [pod("orders-api-a", restarts=2, last_terminated=("OOMKilled", ts(-1)))]
     )
@@ -83,6 +90,21 @@ def test_evidence_windows_follow_the_current_symptoms_not_the_first_alert():
         {"status": "resolved", "starts_at": "2026-10-21T20:09:00.000+00:00"}
     ]
     assert symptom_start(incident).isoformat() == "2026-10-21T20:04:00+00:00"
+
+
+@pytest.mark.parametrize(("after_minutes", "investigations"), [(0, 2), (10, 1)])
+def test_recurrence_reinvestigates_only_a_stale_diagnosis(
+    tmp_path, after_minutes, investigations
+):
+    llm = FakeLLM(reply(), reply())
+    client, investigator = make_client(tmp_path, llm, after_minutes)
+    client.post("/alerts", json=am_payload(am_alert("PodOOMKilled", starts_at=T0)))
+    investigator._pool.shutdown(wait=True)
+    investigator._pool = ThreadPoolExecutor(max_workers=1)
+    later = T0 + timedelta(minutes=30)
+    client.post("/alerts", json=am_payload(am_alert("PodOOMKilled", starts_at=later)))
+    investigator._pool.shutdown(wait=True)
+    assert len(llm.prompts) == investigations
 
 
 def test_reinvestigate_endpoint(tmp_path):

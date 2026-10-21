@@ -14,12 +14,20 @@ from app.remediation import Planner, Responder, memory_mi, token_hash
 POLICY = load_policy()
 
 
-def kube(orders=None, redis=None, pods=()):
+ARGO = "/apis/argoproj.io/v1alpha1/namespaces/argocd/applications"
+
+
+def kube(orders=None, redis=None, pods=(), latest_deploy="abc1234567"):
+    history = [
+        {"revision": "older00000", "deployedAt": "2026-10-21T17:00:00Z"},
+        {"revision": latest_deploy, "deployedAt": "2026-10-21T17:58:00Z"},
+    ]
     return FakeKube(
         {
             f"{APPS}/deployments/orders-api": orders or deployment("orders-api"),
             f"{APPS}/deployments/redis": redis or deployment("redis", 1, 1, 1),
             f"{NS}/pods": {"items": list(pods)},
+            f"{ARGO}/orders-api": {"status": {"history": history}},
         }
     )
 
@@ -86,6 +94,17 @@ def test_rollback_needs_a_recent_suspect_deploy():
     assert (
         "too old to blame"
         in planner().plan("rollback", "orders-api", "demo", old).error
+    )
+
+
+def test_rollback_refuses_a_commit_that_is_no_longer_deployed():
+    # Found live: a stale diagnosis proposed reverting a commit already reverted.
+    signals = Signals(suspect_revision="abc1234567", minutes_since_deploy=2.0)
+    plan = planner(kube(latest_deploy="revert0000")).plan(
+        "rollback", "orders-api", "demo", signals
+    )
+    assert plan.error == (
+        "abc1234 is no longer the latest deploy of orders-api (now revert0); nothing to roll back"
     )
 
 
