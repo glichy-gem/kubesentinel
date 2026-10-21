@@ -29,6 +29,7 @@ class IncidentChange:
     incident_id: int
     event: str  # opened | updated | reopened | resolved
     new_symptoms: tuple[str, ...] = ()  # alert names this incident had not seen before
+    recurrences: int = 0  # new firings of alert names it had already seen
 
     @property
     def needs_investigation(self) -> bool:
@@ -48,33 +49,78 @@ class Correlator:
         """Store one webhook payload and return what changed, one entry per incident."""
         changes: dict[int, str] = {}
         symptoms: dict[int, list[str]] = {}
+        recurrences: dict[int, int] = {}
         with self.db.transaction() as conn:
             self._close_stale(conn, now)
             for alert in payload.alerts:
-                incident_id, event, new_symptom = self._ingest_alert(conn, alert, now)
+                incident_id, event, new_symptom, new_row = self._ingest_alert(
+                    conn, alert, now
+                )
                 # "opened" and "reopened" are more informative than "updated".
                 if changes.get(incident_id) not in ("opened", "reopened"):
                     changes[incident_id] = event
                 found = symptoms.setdefault(incident_id, [])
                 if new_symptom and event != "opened" and new_symptom not in found:
                     found.append(new_symptom)
+                if new_row and not new_symptom and alert.status == "firing":
+                    recurrences[incident_id] = recurrences.get(incident_id, 0) + 1
             for incident_id in changes:
                 if self._resolve_if_quiet(conn, incident_id, now):
                     changes[incident_id] = "resolved"
         return [
-            IncidentChange(i, e, tuple(symptoms.get(i, ()))) for i, e in changes.items()
+            IncidentChange(i, e, tuple(symptoms.get(i, ())), recurrences.get(i, 0))
+            for i, e in changes.items()
         ]
 
     def close_stale(self, now: datetime) -> int:
         with self.db.transaction() as conn:
             return self._close_stale(conn, now)
 
+    def reconcile(
+        self,
+        active: set[tuple[str, str]],
+        now: datetime,
+        grace: timedelta = timedelta(minutes=2),
+    ) -> list[int]:
+        """Resolve stored alerts that Alertmanager no longer reports as firing.
+
+        The webhook alone cannot be trusted: a "resolved" notification sent while
+        the agent was restarting is lost, and its incident would stay open forever
+        and swallow every later alert for that service (found live).
+        `active` holds (fingerprint, iso(startsAt)) of Alertmanager's active alerts.
+        Alerts received within `grace` are left alone to avoid racing the webhook.
+        """
+        resolved_incidents = []
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                "SELECT id, incident_id, fingerprint, starts_at FROM alerts"
+                " WHERE status = 'firing' AND received_at < ?",
+                (iso(now - grace),),
+            ).fetchall()
+            stale = [
+                r for r in rows if (r["fingerprint"], r["starts_at"]) not in active
+            ]
+            for row in stale:
+                conn.execute(
+                    "UPDATE alerts SET status = 'resolved', ends_at = ?, updated_at = ? WHERE id = ?",
+                    (iso(now), iso(now), row["id"]),
+                )
+            for incident_id in sorted({r["incident_id"] for r in stale}):
+                if self._resolve_if_quiet(conn, incident_id, now):
+                    resolved_incidents.append(incident_id)
+            self._close_stale(conn, now)
+        return resolved_incidents
+
     # ------------------------------------------------------------- internals
 
     def _ingest_alert(
         self, conn: sqlite3.Connection, alert: AlertmanagerAlert, now: datetime
-    ) -> tuple[int, str, str | None]:
-        """Store one alert; return its incident, what happened, and its name if new there."""
+    ) -> tuple[int, str, str | None, bool]:
+        """Store one alert.
+
+        Returns its incident, what happened, its name if the incident had not seen
+        it before, and whether this is a new occurrence (not a repeat notification).
+        """
         starts_at = iso(alert.starts_at)
         new_symptom = None
         ends_at = (
@@ -139,7 +185,7 @@ class Correlator:
             ).rowcount
             if reopened:
                 event = "reopened"
-        return incident_id, event, new_symptom
+        return incident_id, event, new_symptom, existing is None
 
     def _incident_for(
         self, conn: sqlite3.Connection, alert: AlertmanagerAlert, now: datetime
