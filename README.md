@@ -170,7 +170,8 @@ Built so far (Phase 5a):
 - **Intake**: `POST /alerts` validates the Alertmanager payload with Pydantic and stores every alert
   in SQLite. Repeat notifications of the same alert update it instead of creating new work.
 - **Correlation**: alerts with the same namespace and service join one incident. An incident resolves
-  when none of its alerts is firing, reopens if they return, and closes after 10 quiet minutes.
+  when none of its alerts is firing, reopens if the same alerts return (flapping), and closes after
+  10 quiet minutes. A different failure after resolution opens a new incident.
   `raw_alert_count` per incident is the alert-reduction metric.
 - **API**: `GET /incidents`, `GET /incidents/{id}` (with evidence and diagnosis),
   `POST /incidents/{id}/investigate`, plus `/metrics` for Prometheus.
@@ -192,13 +193,36 @@ Live result on an injected OOM: 13 facts collected in 1.3 s; matcher and Gemini 
 `memory_limit_too_low`, citing the two `OOMKilled (exit 137)` pods and the 128 Mi limit, and
 proposed `increase_memory_limit` with approval required.
 
+Phase 5c: every diagnosis becomes a policy-checked action
+(see [ADR 8](docs/adr/0008-remediation-through-git-with-a-policy-gate.md) and the
+[threat model](docs/threat-model.md)):
+
+4. **Plan** the exact change from live state, shown before anything runs, for example
+   `commit to kubesentinel-gitops: apps/orders-api/deployment.yaml resources.limits.memory 128Mi -> 256Mi`.
+5. **Decide** with [`policy.yaml`](agent/app/policy.yaml), enforced in code:
+
+   | Action | Risk | Mode | How it runs |
+   |---|---|---|---|
+   | restart a pod | low | auto (max 1 per incident, 3 per hour) | delete the pod |
+   | scale up by 1 (max 4) | low | auto (max 2 per hour) | Git commit |
+   | raise memory limit (x2, max 512Mi) | medium | approval | Git commit |
+   | roll back the suspect deploy (30 min window) | medium | approval | `git revert` |
+   | restart a dependency | medium | approval | Argo CD sync from Git, or delete its pods |
+   | anything else, other namespaces | high | never | not in the policy or RBAC |
+
+6. **Notify** on Telegram with one card per diagnosis: cause, confidence, the top cited evidence,
+   the exact change, and Approve / Reject buttons (one-time token, 15 minute expiry).
+7. **Execute and verify**: Git changes are commits that name the incident and approver; recovery
+   counts only after Argo CD has synced that commit and the deployments are ready. A fix that does
+   not help within 5 minutes pauses automatic actions for that service for an hour.
+
 ```bash
-make agent-secret   # copy GEMINI_API_KEY etc. from .env into a Kubernetes Secret
+make agent-secret   # GEMINI_API_KEY and Telegram settings from .env into a Kubernetes Secret
+make agent-git-key  # the agent's own deploy key for kubesentinel-gitops (rotates on re-run)
 kubectl -n kubesentinel port-forward svc/kubesentinel-agent 8000:8000
 curl localhost:8000/incidents/1
+curl localhost:8000/actions
 ```
-
-Next (5c): the policy gate, Telegram incident cards with Approve / Reject, and the actions.
 
 ## Failure scenarios
 

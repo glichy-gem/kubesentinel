@@ -38,6 +38,22 @@ class KubeClient:
         response.raise_for_status()
         return response.json()
 
+    # The only writes, and RBAC allows exactly these: delete pods in demo,
+    # patch Argo CD Applications (refresh / sync). Everything else goes through Git.
+
+    def delete(self, path: str) -> None:
+        response = self._client.delete(path, headers=self._headers())
+        response.raise_for_status()
+
+    def merge_patch(self, path: str, body: dict) -> dict:
+        response = self._client.patch(
+            path,
+            json=body,
+            headers={**self._headers(), "Content-Type": "application/merge-patch+json"},
+        )
+        response.raise_for_status()
+        return response.json()
+
 
 class PrometheusClient:
     def __init__(self, base_url: str, timeout: float = 10) -> None:

@@ -10,7 +10,13 @@ RUN uv sync --frozen --no-dev
 FROM python:3.12-slim
 # Links the GHCR package to this repository (and its public visibility).
 LABEL org.opencontainers.image.source="https://github.com/glichy-gem/kubesentinel"
-RUN useradd --system --uid 10001 --no-create-home app
+# git and ssh let the agent commit fixes to the GitOps repo with its deploy key.
+# Versions follow the pinned base image's Debian release; Trivy scans the result.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY app ./app

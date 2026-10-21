@@ -87,9 +87,53 @@ CREATE TABLE evidence (
 );
 """
 
+# Remediation: every proposed action, its policy decision, who decided, what ran
+# and whether the service recovered. The audit log of everything the agent did.
+SCHEMA_V3 = """
+ALTER TABLE incidents ADD COLUMN telegram_message_id INTEGER;
+
+CREATE TABLE actions (
+    id            INTEGER PRIMARY KEY,
+    incident_id   INTEGER NOT NULL REFERENCES incidents (id),
+    diagnosis_id  INTEGER NOT NULL REFERENCES diagnoses (id),
+    created_at    TEXT NOT NULL,
+    service       TEXT NOT NULL,  -- the incident's service (rate limits are per service)
+    namespace     TEXT NOT NULL,
+    type          TEXT NOT NULL,
+    target        TEXT NOT NULL,  -- the deployment the action changes
+    via           TEXT NOT NULL,  -- git | kubernetes | argocd | none
+    params_json   TEXT NOT NULL,
+    description   TEXT NOT NULL,  -- the exact change, shown before it runs
+    risk          TEXT NOT NULL,
+    mode          TEXT NOT NULL,  -- auto | approval | blocked | none
+    reason        TEXT NOT NULL,  -- why the policy chose that mode
+    status        TEXT NOT NULL,
+    token_hash    TEXT,           -- approval token (sha256); the token itself is never stored
+    expires_at    TEXT,
+    decided_at    TEXT,
+    decided_by    TEXT,
+    executed_at   TEXT,
+    result        TEXT,
+    commit_sha    TEXT,
+    verified_at   TEXT,
+    verification  TEXT,
+    telegram_message_id INTEGER  -- the card this action was proposed on
+);
+CREATE INDEX actions_by_incident ON actions (incident_id);
+
+CREATE TABLE automation_pauses (
+    service      TEXT PRIMARY KEY,
+    paused_until TEXT NOT NULL,
+    reason       TEXT NOT NULL
+);
+"""
+
 # Applied in order; PRAGMA user_version records how many have run.
 # Version 1 uses IF NOT EXISTS because databases created before migrations existed already have it.
-MIGRATIONS = [SCHEMA, SCHEMA_V2]
+MIGRATIONS = [SCHEMA, SCHEMA_V2, SCHEMA_V3]
+
+# Statuses that count as "this action happened" for rate limits.
+RAN = ("approved", "executing", "executed", "recovered", "not_recovered", "failed")
 
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
@@ -98,6 +142,13 @@ def _decode_diagnosis(row: sqlite3.Row) -> dict:
     out = dict(row)
     for key in ("diagnosis_json", "candidates_json", "signals_json", "notes_json"):
         out[key.removesuffix("_json")] = json.loads(out.pop(key))
+    return out
+
+
+def _decode_action(row: sqlite3.Row) -> dict:
+    out = dict(row)
+    out["params"] = json.loads(out.pop("params_json"))
+    out.pop("token_hash")  # never leaves the database
     return out
 
 
@@ -216,3 +267,143 @@ class Database:
                 "SELECT status, COUNT(*) AS n FROM incidents GROUP BY status"
             ).fetchall()
         return {r["status"]: r["n"] for r in rows}
+
+    # ------------------------------------------------------------- actions
+
+    def insert_action(self, record: dict) -> int:
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                f"INSERT INTO actions ({', '.join(record)})"
+                f" VALUES ({', '.join('?' for _ in record)})",
+                [record[k] for k in record],
+            )
+            return cursor.lastrowid
+
+    def get_action(self, action_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM actions WHERE id = ?", (action_id,)
+            ).fetchone()
+        return _decode_action(row) if row else None
+
+    def list_actions(
+        self, incident_id: int | None = None, limit: int = 50
+    ) -> list[dict]:
+        query, params = "SELECT * FROM actions", []
+        if incident_id is not None:
+            query += " WHERE incident_id = ?"
+            params.append(incident_id)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [_decode_action(r) for r in rows]
+
+    def transition(
+        self, action_id: int, from_statuses: tuple[str, ...], to_status: str, **fields
+    ) -> bool:
+        """Move an action between statuses atomically; False if it was not in from_statuses.
+
+        This is what makes a double tap on Approve, or an approval racing an
+        expiry, harmless: only one transition can win.
+        """
+        sets = ", ".join(["status = ?", *(f"{k} = ?" for k in fields)])
+        marks = ", ".join("?" for _ in from_statuses)
+        with self.transaction() as conn:
+            return bool(
+                conn.execute(
+                    f"UPDATE actions SET {sets} WHERE id = ? AND status IN ({marks})",
+                    [to_status, *fields.values(), action_id, *from_statuses],
+                ).rowcount
+            )
+
+    def decide_action(
+        self, action_id: int, token_hash: str, approve: bool, by: str, now: datetime
+    ) -> bool:
+        """Approve or reject a proposed action if the token matches and has not expired."""
+        with self.transaction() as conn:
+            return bool(
+                conn.execute(
+                    "UPDATE actions SET status = ?, decided_at = ?, decided_by = ?"
+                    " WHERE id = ? AND status = 'proposed' AND token_hash = ? AND expires_at > ?",
+                    (
+                        "approved" if approve else "rejected",
+                        iso(now),
+                        by,
+                        action_id,
+                        token_hash,
+                        iso(now),
+                    ),
+                ).rowcount
+            )
+
+    def expire_actions(self, now: datetime) -> list[int]:
+        with self.transaction() as conn:
+            rows = conn.execute(
+                "UPDATE actions SET status = 'expired' WHERE status = 'proposed'"
+                " AND expires_at <= ? RETURNING id",
+                (iso(now),),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def supersede_pending(self, incident_id: int) -> int:
+        """A newer diagnosis replaces any action still waiting for approval."""
+        with self.transaction() as conn:
+            return conn.execute(
+                "UPDATE actions SET status = 'superseded'"
+                " WHERE incident_id = ? AND status = 'proposed'",
+                (incident_id,),
+            ).rowcount
+
+    def count_actions(
+        self,
+        action_type: str,
+        *,
+        incident_id: int | None = None,
+        service: str | None = None,
+        since: datetime | None = None,
+    ) -> int:
+        query = f"SELECT COUNT(*) FROM actions WHERE type = ? AND status IN ({', '.join('?' for _ in RAN)})"
+        params: list = [action_type, *RAN]
+        if incident_id is not None:
+            query += " AND incident_id = ?"
+            params.append(incident_id)
+        if service is not None:
+            query += " AND service = ?"
+            params.append(service)
+        if since is not None:
+            query += " AND created_at >= ?"
+            params.append(iso(since))
+        with self._lock:
+            return self._conn.execute(query, params).fetchone()[0]
+
+    def set_action_message(self, action_id: int, message_id: int) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE actions SET telegram_message_id = ? WHERE id = ?",
+                (message_id, action_id),
+            )
+
+    def set_telegram_message(self, incident_id: int, message_id: int) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE incidents SET telegram_message_id = ? WHERE id = ?",
+                (message_id, incident_id),
+            )
+
+    def pause_automation(self, service: str, until: datetime, reason: str) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                "INSERT INTO automation_pauses (service, paused_until, reason) VALUES (?, ?, ?)"
+                " ON CONFLICT (service) DO UPDATE SET paused_until = excluded.paused_until,"
+                " reason = excluded.reason",
+                (service, iso(until), reason),
+            )
+
+    def automation_paused(self, service: str, now: datetime) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM automation_pauses WHERE service = ? AND paused_until > ?",
+                (service, iso(now)),
+            ).fetchone()
+        return row is not None

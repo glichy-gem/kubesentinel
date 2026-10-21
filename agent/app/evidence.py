@@ -36,6 +36,9 @@ class Signals(BaseModel):
     restarts_15m: float | None = None
     # Minutes between the newest deploy and the first alert (deploys after it are ignored).
     minutes_since_deploy: float | None = None
+    # That deploy, for a rollback: GitOps commit sha and its first line.
+    suspect_revision: str | None = None
+    suspect_message: str | None = None
 
 
 @dataclass

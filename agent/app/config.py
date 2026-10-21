@@ -33,3 +33,14 @@ class Settings(BaseSettings):
     # Tried in order: the free tier often rejects the main model under load ("high demand").
     gemini_models: list[str] = ["gemini-flash-latest", "gemini-flash-lite-latest"]
     gemini_thinking_level: str = "low"  # empty = the model's default
+
+    # Remediation. Without Telegram there is no way to approve, so approval-mode
+    # actions simply wait and expire; auto actions still run within the policy.
+    remediate: bool = True
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str = ""
+    # GitOps write access: the deploy key from `make agent-git-key`, mounted here.
+    # Without it, Git-based actions (rollback, memory, scale) fail and are reported.
+    gitops_ssh_url: str = "git@github.com:glichy-gem/kubesentinel-gitops.git"
+    git_key_dir: str = "/secrets/git"
+    workdir: str = "/tmp/kubesentinel"
