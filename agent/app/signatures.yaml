@@ -1,0 +1,61 @@
+# Known failure signatures (design doc section 6.4). Rules first, LLM second:
+# a match gives a candidate cause, an action and a confidence, citing the facts
+# behind each condition. Order does not matter; candidates are ranked by confidence.
+#
+# Conditions: {signal: <Signals field>, <op>: <value>} with op in
+# is, gt, gte, lt, lte. All conditions must hold. A signal with no value
+# (metric missing) never satisfies a numeric condition.
+
+- name: image-pull-failure
+  cause: image_pull_error
+  action: rollback
+  confidence: 0.9
+  when:
+    - { signal: image_pull_error, is: true }
+  explain: New pods cannot pull their image; the newest deploy points at an image that does not exist or is not accessible.
+
+- name: oom-killed
+  cause: memory_limit_too_low
+  action: increase_memory_limit
+  confidence: 0.85
+  when:
+    - { signal: oom_killed, is: true }
+  explain: Containers were OOMKilled; memory use reaches the container limit.
+
+- name: crash-after-deploy
+  cause: bad_release
+  action: rollback
+  confidence: 0.85
+  when:
+    - { signal: crash_looping, is: true }
+    - { signal: minutes_since_deploy, lte: 15 }
+    - { signal: oom_killed, is: false }
+  explain: Pods started crash looping shortly after a deploy, and they are not running out of memory.
+
+- name: invalid-config
+  cause: config_invalid
+  action: rollback
+  confidence: 0.7
+  when:
+    - { signal: crash_looping, is: true }
+    - { signal: config_error_in_logs, is: true }
+  explain: Pods crash at startup with a configuration validation error.
+
+- name: dependency-down
+  cause: dependency_down
+  action: restart_dependency
+  confidence: 0.85
+  when:
+    - { signal: dependency_unavailable, is: true }
+  explain: A dependency of the service has no ready replicas, so requests that need it fail.
+
+- name: saturation
+  cause: saturation
+  action: scale_up
+  confidence: 0.75
+  when:
+    - { signal: p95_seconds, gt: 0.5 }
+    - { signal: cpu_ratio, gte: 0.8 }
+    - { signal: crash_looping, is: false }
+    - { signal: dependency_unavailable, is: false }
+  explain: Latency is high while CPU is at its limit and nothing else is broken; the service needs more capacity.

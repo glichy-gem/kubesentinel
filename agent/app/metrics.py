@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 ALERTS_RECEIVED = Counter(
     "kubesentinel_alerts_received_total",
@@ -14,4 +14,14 @@ INCIDENTS = Gauge(
     "kubesentinel_incidents",
     "Incidents currently stored, by status",
     ["status"],
+)
+DIAGNOSES = Counter(
+    "kubesentinel_diagnoses_total",
+    "Diagnoses produced, by who produced them (llm or matcher fallback) and root cause",
+    ["source", "root_cause"],
+)
+INVESTIGATION_SECONDS = Histogram(
+    "kubesentinel_investigation_seconds",
+    "Time from starting evidence collection to a stored diagnosis",
+    buckets=(1, 2, 5, 10, 20, 30, 60, 120),
 )

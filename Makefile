@@ -17,7 +17,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test agent-test argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
+.PHONY: cluster down status test agent-test agent-secret argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -36,6 +36,24 @@ test:
 # Run the agent unit tests (no cluster needed).
 agent-test:
 	cd agent && uv run pytest -q
+
+# Copy the keys from .env into the agent's Secret (never into Git), then restart
+# the agent so it picks them up. The values never appear on a command line: they
+# go through a private temp file, and server-side apply keeps them out of the
+# last-applied annotation.
+agent-secret:
+	@test -f .env || (echo "create .env from .env.example first"; exit 2)
+	@kubectl create namespace kubesentinel --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@umask 077; mkdir -p .tmp; \
+	sed -n -e 's/^GEMINI_API_KEY=/KS_GEMINI_API_KEY=/p' \
+	       -e 's/^TELEGRAM_BOT_TOKEN=/KS_TELEGRAM_BOT_TOKEN=/p' \
+	       -e 's/^TELEGRAM_CHAT_ID=/KS_TELEGRAM_CHAT_ID=/p' .env > .tmp/agent.env; \
+	kubectl -n kubesentinel create secret generic kubesentinel-agent-secrets \
+	  --from-env-file=.tmp/agent.env --dry-run=client -o yaml \
+	  | kubectl apply --server-side --field-manager=make-agent-secret -f -; \
+	rc=$$?; rm -f .tmp/agent.env; exit $$rc
+	@# Deleting the pod (not `rollout restart`) avoids a template change that Argo CD would see as drift.
+	-kubectl -n kubesentinel delete pod -l app=kubesentinel-agent --wait=false
 
 # Install Argo CD (core, no UI) and hand it the GitOps repo. After this, every
 # deploy is a commit to kubesentinel-gitops; the demo app appears on its own.
