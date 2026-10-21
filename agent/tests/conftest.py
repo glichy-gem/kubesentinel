@@ -77,4 +77,5 @@ def correlator(db: Database) -> Correlator:
 
 @pytest.fixture
 def client(tmp_path) -> TestClient:
-    return TestClient(create_app(Settings(db_path=str(tmp_path / "api.db"))))
+    settings = Settings(db_path=str(tmp_path / "api.db"), investigate=False)
+    return TestClient(create_app(settings))

@@ -172,15 +172,33 @@ Built so far (Phase 5a):
 - **Correlation**: alerts with the same namespace and service join one incident. An incident resolves
   when none of its alerts is firing, reopens if they return, and closes after 10 quiet minutes.
   `raw_alert_count` per incident is the alert-reduction metric.
-- **API**: `GET /incidents`, `GET /incidents/{id}`, plus `/metrics` for Prometheus.
+- **API**: `GET /incidents`, `GET /incidents/{id}` (with evidence and diagnosis),
+  `POST /incidents/{id}/investigate`, plus `/metrics` for Prometheus.
+
+Phase 5b: every new incident is investigated in the background
+(see [ADR 7](docs/adr/0007-agent-rules-first-evidence-ids.md)):
+
+1. **Collect** read-only evidence as short facts with ids: pod status and last termination reason,
+   warning events, error log lines from Loki, metrics from Prometheus (error ratio, p95, memory and
+   CPU against limits, restarts), dependency health, and recent deploys from Argo CD with the
+   commit message and diff from GitHub. Secrets are redacted; env var values are never read.
+2. **Match** known failure signatures ([`signatures.yaml`](agent/app/signatures.yaml)) for a
+   candidate cause and action that cite the facts behind them.
+3. **Diagnose** with Gemini, which must return schema-valid JSON that cites fact ids. Invented
+   ids are dropped, risky actions always need a human, and if Gemini is busy or wrong the agent falls
+   back to a lighter model, then to the matcher.
+
+Live result on an injected OOM: 13 facts collected in 1.3 s; matcher and Gemini both concluded
+`memory_limit_too_low`, citing the two `OOMKilled (exit 137)` pods and the 128 Mi limit, and
+proposed `increase_memory_limit` with approval required.
 
 ```bash
+make agent-secret   # copy GEMINI_API_KEY etc. from .env into a Kubernetes Secret
 kubectl -n kubesentinel port-forward svc/kubesentinel-agent 8000:8000
-curl localhost:8000/incidents
+curl localhost:8000/incidents/1
 ```
 
-Next: evidence collectors, a rule-based signature matcher, the Gemini root-cause step, the policy
-gate and Telegram approvals.
+Next (5c): the policy gate, Telegram incident cards with Approve / Reject, and the actions.
 
 ## Failure scenarios
 
