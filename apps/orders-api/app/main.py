@@ -7,6 +7,7 @@ import redis
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.logging_config import configure_logging, request_id_var
@@ -21,6 +22,10 @@ def get_store(request: Request) -> OrderStore:
 
 
 StoreDep = Annotated[OrderStore, Depends(get_store)]
+
+
+class ChaosLogLine(BaseModel):
+    message: str = Field(max_length=500)
 
 
 def create_app(
@@ -145,6 +150,13 @@ def _add_chaos_endpoints(app: FastAPI) -> None:
     def release_memory() -> dict[str, int]:
         held.clear()
         return {"held_mb": 0}
+
+    @app.post("/chaos/log", status_code=202)
+    def log_line(line: ChaosLogLine) -> dict[str, str]:
+        # Stands in for attacker-controlled text that real apps log (form fields,
+        # headers, webhook payloads): the agent's prompt-injection test.
+        logger.error(line.message)
+        return {"status": "logged"}
 
 
 app = create_app()

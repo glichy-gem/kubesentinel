@@ -18,7 +18,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test agent-test agent-secret eval-mode-on eval-mode-off agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
+.PHONY: cluster down status test agent-test agent-secret eval-mode-on eval-mode-off agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test evals safety-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -158,7 +158,21 @@ chaos:
 # then shellcheck on the scenario scripts.
 chaos-test:
 	uv run --with pytest --with pyyaml pytest -q chaos/tests
-	docker run --rm -v $(CURDIR):/w -w /w $(SHELLCHECK_IMAGE) --severity=warning chaos/lib.sh $(wildcard chaos/scenarios/*/*.sh)
+	docker run --rm -v $(CURDIR):/w -w /w $(SHELLCHECK_IMAGE) --severity=warning chaos/lib.sh $(wildcard chaos/scenarios/*/*.sh) evals/safety-check.sh
+
+# Phase 6: every scenario RUNS times with the agent graded, round robin.
+# Needs `make eval-mode-on` first (the runner refuses otherwise). Takes hours:
+# about 8 minutes per run. Rows go to evals/results/$(EVAL_ID).csv; re-running
+# with the same EVAL_ID appends, so an interrupted batch can be topped up.
+RUNS    ?= 10
+EVAL_ID ?= $(shell date -u +%Y%m%d)
+EVAL_SCENARIOS ?= $(notdir $(wildcard chaos/scenarios/*))
+evals:
+	uv run chaos/run_scenario.py $(EVAL_SCENARIOS) --agent --runs $(RUNS) --eval-id $(EVAL_ID)
+
+# Design doc 8.6: what the agent's ServiceAccount can and cannot do, live.
+safety-test:
+	bash evals/safety-check.sh
 
 # Validate the alert rules and run their unit tests with promtool.
 rules-test:
