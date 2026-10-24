@@ -16,6 +16,6 @@ __pycache__/
 chaos/results/
 *.sqlite
 *.db
-evals/results/*.csv
+# evals/results/ and evals/snapshots/ ARE committed: they back the README's numbers.
 .ipynb_checkpoints/
 .DS_Store

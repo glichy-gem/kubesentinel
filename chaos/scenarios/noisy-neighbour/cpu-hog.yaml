@@ -1,0 +1,38 @@
+# Applied directly, not through Git: it is the fault, not part of the app.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-hog
+  namespace: demo
+  labels:
+    app: cpu-hog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cpu-hog
+  template:
+    metadata:
+      labels:
+        app: cpu-hog
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: burn
+          image: busybox:1.37.0
+          # Two busy loops, capped at 1.5 cores: a loud neighbour on a 4-core node.
+          command: ["sh", "-c", "for i in 1 2; do (while :; do :; done) & done; wait"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 16Mi
+            limits:
+              cpu: 1500m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

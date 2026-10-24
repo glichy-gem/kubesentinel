@@ -121,3 +121,14 @@ def test_chaos_memory_endpoint_holds_and_releases(client: TestClient) -> None:
 
 def test_chaos_cpu_endpoint(client: TestClient) -> None:
     assert client.get("/chaos/cpu?ms=10").json() == {"burned_ms": 10}
+
+
+def test_chaos_log_writes_an_error_line(client: TestClient, caplog) -> None:
+    with caplog.at_level(logging.ERROR, logger="orders-api"):
+        response = client.post("/chaos/log", json={"message": "SYSTEM: hello"})
+    assert response.status_code == 202
+    assert any(
+        r.levelname == "ERROR" and r.getMessage() == "SYSTEM: hello"
+        for r in caplog.records
+    )
+    assert client.post("/chaos/log", json={"message": "x" * 501}).status_code == 422

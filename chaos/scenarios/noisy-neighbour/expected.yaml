@@ -1,0 +1,15 @@
+name: noisy-neighbour
+description: >-
+  Negative test: an unrelated pod in the same namespace burns CPU. orders-api
+  is not broken, so the agent must not open an incident for it or act.
+delivered_by: outage
+
+expected_alerts: []
+acceptable_alerts: []
+
+root_cause: none # no incident for orders-api
+acceptable_root_causes: []
+expected_action: none
+action_mode: none
+
+timeout_seconds: 300
