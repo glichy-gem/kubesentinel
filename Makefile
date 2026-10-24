@@ -18,7 +18,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test agent-test agent-secret agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
+.PHONY: cluster down status test agent-test agent-secret eval-mode-on eval-mode-off agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -55,6 +55,21 @@ agent-secret:
 	rc=$$?; rm -f .tmp/agent.env; exit $$rc
 	@# Deleting the pod (not `rollout restart`) avoids a template change that Argo CD would see as drift.
 	-kubectl -n kubesentinel delete pod -l app=kubesentinel-agent --wait=false
+
+# Eval mode for Phase 6: the agent still investigates and records what it would
+# do, but sends no Telegram cards and changes nothing (KS_DRY_RUN), and closes
+# quiet incidents after 2 minutes so back-to-back runs do not merge.
+eval-mode-on:
+	kubectl -n kubesentinel create configmap kubesentinel-agent-eval \
+	  --from-literal=KS_DRY_RUN=true --from-literal=KS_QUIET_MINUTES_TO_CLOSE=2 \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	kubectl -n kubesentinel delete pod -l app=kubesentinel-agent
+	kubectl -n kubesentinel rollout status deployment/kubesentinel-agent --timeout=120s
+
+eval-mode-off:
+	-kubectl -n kubesentinel delete configmap kubesentinel-agent-eval
+	kubectl -n kubesentinel delete pod -l app=kubesentinel-agent
+	kubectl -n kubesentinel rollout status deployment/kubesentinel-agent --timeout=120s
 
 # Give the agent write access to the GitOps repo, and nothing else: a fresh SSH
 # deploy key for that one repo (any older agent key is removed, so running this

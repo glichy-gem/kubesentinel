@@ -182,9 +182,32 @@ def incident(db):
     return db.get_incident(1), diag_id
 
 
-def responder(db, executed):
+def responder(db, executed, dry_run=False):
     notifier = FakeNotifier()
-    return Responder(db, planner(), POLICY, notifier, executed.append), notifier
+    return (
+        Responder(db, planner(), POLICY, notifier, executed.append, dry_run),
+        notifier,
+    )
+
+
+@pytest.mark.parametrize(
+    ("action", "needs_human", "mode"),
+    [("increase_memory_limit", True, "approval"), ("scale_up", False, "auto")],
+)
+def test_dry_run_records_the_decision_but_changes_nothing(
+    db, incident, action, needs_human, mode
+):
+    inc, diag_id = incident
+    executed = []
+    r, notifier = responder(db, executed, dry_run=True)
+    recorded = r.respond(
+        inc, diag_id, diagnosis(action, needs_human=needs_human), Signals(), None
+    )
+    assert (recorded["mode"], recorded["status"]) == (mode, "dry_run")
+    assert recorded["decided_by"] is None and recorded["expires_at"] is None
+    assert executed == [] and notifier.cards == []
+    # Dry runs are not "actions that happened", so they never use up rate limits.
+    assert db.count_actions(action, incident_id=inc["id"]) == 0
 
 
 def test_approval_action_gets_a_token_a_card_and_waits(db, incident):

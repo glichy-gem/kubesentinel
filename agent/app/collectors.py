@@ -12,6 +12,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from app.clients import GitHubClient, KubeClient, LokiClient, PrometheusClient
+from app.config import AGENT_AUTHOR
 from app.evidence import Evidence
 
 logger = logging.getLogger("kubesentinel.collectors")
@@ -309,11 +310,18 @@ class Collector:
                 for line in f.get("patch", "").splitlines()
                 if line[:1] in "+-" and line[:3] not in ("+++", "---")
             ][:6]
+            # Found live: the agent proposed rolling back its own approved fix. Its
+            # deploys stay visible but are never the suspect; if a fix makes things
+            # worse, the circuit breaker handles it, not another rollback.
+            by_agent = author == AGENT_AUTHOR
             fact = ev.add(
                 "deploys",
-                f"deploy {revision[:7]} {minutes:.1f} min before the first alert: '{message}' by {author};"
+                f"deploy {revision[:7]} {minutes:.1f} min before the first alert: '{message}' by {author}"
+                f"{' (a KubeSentinel remediation, not a release)' if by_agent else ''};"
                 f" changed lines: {' | '.join(changes) or 'none shown'}",
             )
+            if by_agent:
+                continue
             if ev.signals.minutes_since_deploy is None:  # newest first
                 ev.signal("minutes_since_deploy", round(minutes, 1), fact)
                 ev.signal("suspect_revision", revision, fact)

@@ -1,6 +1,9 @@
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Name on the agent's own GitOps commits; the collectors recognise its deploys by it.
+AGENT_AUTHOR = "KubeSentinel agent"
+
 
 class Settings(BaseSettings):
     """Runtime configuration, read from KS_* environment variables."""
@@ -42,6 +45,8 @@ class Settings(BaseSettings):
     # Remediation. Without Telegram there is no way to approve, so approval-mode
     # actions simply wait and expire; auto actions still run within the policy.
     remediate: bool = True
+    # Evals: plan and record every action as "dry_run", but never notify or execute.
+    dry_run: bool = False
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str = ""
     # GitOps write access: the deploy key from `make agent-git-key`, mounted here.

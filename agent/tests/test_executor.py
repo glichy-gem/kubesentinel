@@ -148,6 +148,19 @@ def test_revert_undoes_the_suspect_commit(gitops, remote, tmp_path):
     assert "image: orders-api" in remote_file(remote, tmp_path)
 
 
+def test_a_revert_conflict_says_why(gitops, remote, tmp_path):
+    # Found live: the conflict went to stdout and the error read only "git revert failed: ".
+    bad = git("rev-parse", "main", cwd=remote)
+    gitops.commit(
+        "later change on the same line",
+        lambda repo: (repo / "apps/orders-api/deployment.yaml").write_text(
+            MANIFEST.replace("image: orders-api", "image: other")
+        ),
+    )
+    with pytest.raises(GitError, match="CONFLICT"):
+        gitops.revert(bad, "KubeSentinel incident #8")
+
+
 def test_a_change_with_no_diff_is_an_error(gitops):
     with pytest.raises(GitError, match="no diff"):
         gitops.commit("nothing", lambda repo: None)
