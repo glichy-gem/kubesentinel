@@ -1,0 +1,502 @@
+{
+ "scenario": "bad-config",
+ "injected_at": "2026-10-24T17:36:36.665893+00:00",
+ "expected": {
+  "name": "bad-config",
+  "description": "A release adds an invalid setting; new pods crash loop at startup.",
+  "expected_alerts": [
+   "PodCrashLooping"
+  ],
+  "acceptable_alerts": [
+   "DeploymentRolloutStuck"
+  ],
+  "root_cause": "bad_release",
+  "expected_action": "rollback",
+  "action_mode": "approval",
+  "timeout_seconds": 420,
+  "acceptable_root_causes": [
+   "config_invalid"
+  ],
+  "delivered_by": "git",
+  "evidence_must_contain": ""
+ },
+ "incidents": [
+  {
+   "incident": {
+    "id": 7,
+    "namespace": "demo",
+    "service": "orders-api",
+    "status": "open",
+    "severity": "critical",
+    "title": "orders-api is crash looping",
+    "opened_at": "2026-10-24T17:40:57.976+00:00",
+    "first_alert_at": "2026-10-24T17:39:53.814+00:00",
+    "updated_at": "2026-10-24T17:41:55.199+00:00",
+    "resolved_at": null,
+    "closed_at": null,
+    "raw_alert_count": 1,
+    "notification_count": 2,
+    "diagnosed_at": "2026-10-24T17:42:05.005+00:00",
+    "root_cause": "config_invalid",
+    "proposed_action": "rollback orders-api",
+    "telegram_message_id": null,
+    "alerts": [
+     {
+      "id": 21,
+      "incident_id": 7,
+      "fingerprint": "26e3aea61647562d",
+      "starts_at": "2026-10-24T17:39:53.814+00:00",
+      "name": "PodCrashLooping",
+      "severity": "critical",
+      "status": "firing",
+      "labels": {
+       "alertname": "PodCrashLooping",
+       "container": "orders-api",
+       "namespace": "demo",
+       "pod": "orders-api-6cdb8887f5-mbmns",
+       "prometheus": "monitoring/kps-kube-prometheus-stack-prometheus",
+       "service": "orders-api",
+       "severity": "critical"
+      },
+      "annotations": {
+       "description": "Container orders-api in pod orders-api-6cdb8887f5-mbmns restarted more than 3 times in the last 5 minutes.",
+       "summary": "orders-api is crash looping"
+      },
+      "received_at": "2026-10-24T17:40:57.976+00:00",
+      "updated_at": "2026-10-24T17:41:55.199+00:00",
+      "ends_at": null,
+      "notifications": 2
+     }
+    ],
+    "diagnosis": {
+     "id": 10,
+     "incident_id": 7,
+     "created_at": "2026-10-24T17:42:05.005+00:00",
+     "source": "llm",
+     "root_cause": "config_invalid",
+     "confidence": 0.85,
+     "action_type": "rollback",
+     "action_target": "orders-api",
+     "prompt_version": "rca_v1",
+     "model": "gemini-3.5-flash-lite",
+     "latency_ms": 39758,
+     "input_tokens": 1663,
+     "output_tokens": 174,
+     "agrees_with_matcher": 0,
+     "collect_ms": 6872,
+     "diagnosis": {
+      "summary": "The orders-api service is experiencing a crash loop shortly after a recent configuration deployment that introduced an invalid timeout value format, causing readiness and liveness probes to fail.",
+      "root_cause": "config_invalid",
+      "confidence": 0.85,
+      "evidence": [
+       "E1",
+       "E6",
+       "E10",
+       "E16"
+      ],
+      "alternatives": [
+       "bad_release"
+      ],
+      "proposed_action": {
+       "type": "rollback",
+       "target": "orders-api",
+       "reason": "Rollback the recent configuration change that introduced an invalid timeout string format."
+      },
+      "needs_human": true
+     },
+     "candidates": [
+      {
+       "signature": "crash-after-deploy",
+       "cause": "bad_release",
+       "action": "rollback",
+       "confidence": 0.85,
+       "explain": "Pods started crash looping shortly after a deploy, and they are not running out of memory.",
+       "evidence": [
+        "E15",
+        "E16"
+       ]
+      }
+     ],
+     "signals": {
+      "oom_killed": false,
+      "crash_looping": true,
+      "image_pull_error": false,
+      "rollout_stuck": true,
+      "pods_not_ready": 1,
+      "dependency_unavailable": false,
+      "connection_errors_in_logs": false,
+      "config_error_in_logs": false,
+      "error_ratio": null,
+      "p95_seconds": 0.11,
+      "memory_peak_ratio": 0.571,
+      "cpu_ratio": 0.027,
+      "restarts_15m": 4.4,
+      "minutes_since_deploy": 2.7,
+      "suspect_revision": "3ad7f6b65b8001ad84470067d0f4ae5528005704",
+      "suspect_message": "chore(orders-api): tune redis client timeout"
+     },
+     "notes": []
+    },
+    "evidence": [
+     {
+      "fact_id": "E1",
+      "source": "pods",
+      "content": "pod orders-api-6cdb8887f5-mbmns: phase Running, ready False, restarts 5, last terminated Error (exit 1) at 2026-10-24T17:39:43Z"
+     },
+     {
+      "fact_id": "E2",
+      "source": "pods",
+      "content": "pod orders-api-85ff75df5d-8hpsx: phase Running, ready True, restarts 0"
+     },
+     {
+      "fact_id": "E3",
+      "source": "pods",
+      "content": "pod orders-api-85ff75df5d-wbn6t: phase Running, ready True, restarts 0"
+     },
+     {
+      "fact_id": "E4",
+      "source": "deployment",
+      "content": "deployment orders-api: 2/2 ready, 1 updated, image ghcr.io/glichy-gem/orders-api:sha-2d4f696, limits {'cpu': '250m', 'memory': '128Mi'}, requests {'cpu': '50m', 'memory': '64Mi'}, env names ['ORDERS_REDIS_URL', 'ORDERS_REDIS_TIMEOUT_SECONDS']"
+     },
+     {
+      "fact_id": "E5",
+      "source": "dependencies",
+      "content": "dependency redis of orders-api: 1/1 replicas ready"
+     },
+     {
+      "fact_id": "E6",
+      "source": "events",
+      "content": "event Unhealthy x17 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": dial tcp 10.244.0.5:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E7",
+      "source": "events",
+      "content": "event Unhealthy x16 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": dial tcp 10.244.0.17:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E8",
+      "source": "events",
+      "content": "event Unhealthy x12 on Pod: Readiness probe failed: Get \"http://10.244.0.24:8000/ready\": dial tcp 10.244.0.24:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E9",
+      "source": "events",
+      "content": "event BackOff x7 on Pod: Back-off restarting failed container orders-api in pod orders-api-*_demo(b3276dde-ddf3-47ce-90fb-f63959271e57)"
+     },
+     {
+      "fact_id": "E10",
+      "source": "events",
+      "content": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.5:8000/health\": dial tcp 10.244.0.5:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E11",
+      "source": "events",
+      "content": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.17:8000/health\": dial tcp 10.244.0.17:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E12",
+      "source": "metrics",
+      "content": "p95 latency over 5m: 0.110 s"
+     },
+     {
+      "fact_id": "E13",
+      "source": "metrics",
+      "content": "peak memory over 15m: 73 MiB = 57% of the 128 MiB limit"
+     },
+     {
+      "fact_id": "E14",
+      "source": "metrics",
+      "content": "CPU per pod (max): 0.007 cores = 3% of the 0.25-core limit"
+     },
+     {
+      "fact_id": "E15",
+      "source": "metrics",
+      "content": "container restarts over 15m: 4"
+     },
+     {
+      "fact_id": "E16",
+      "source": "deploys",
+      "content": "deploy 3ad7f6b 2.7 min before the first alert: 'chore(orders-api): tune redis client timeout' by Shivam Yadav; changed lines: + - name: ORDERS_REDIS_TIMEOUT_SECONDS | + value: 1.5s"
+     },
+     {
+      "fact_id": "E17",
+      "source": "deploys",
+      "content": "deploy 62c11bd 7.6 min before the first alert: 'deploy(orders-api): sha-2d4f696' by github-actions[bot]; changed lines: - newTag: sha-12fc565 | + newTag: sha-2d4f696"
+     }
+    ]
+   },
+   "diagnoses": [
+    {
+     "id": 10,
+     "incident_id": 7,
+     "created_at": "2026-10-24T17:42:05.005+00:00",
+     "source": "llm",
+     "root_cause": "config_invalid",
+     "confidence": 0.85,
+     "action_type": "rollback",
+     "action_target": "orders-api",
+     "prompt_version": "rca_v1",
+     "model": "gemini-3.5-flash-lite",
+     "latency_ms": 39758,
+     "input_tokens": 1663,
+     "output_tokens": 174,
+     "agrees_with_matcher": 0,
+     "collect_ms": 6872,
+     "diagnosis": {
+      "summary": "The orders-api service is experiencing a crash loop shortly after a recent configuration deployment that introduced an invalid timeout value format, causing readiness and liveness probes to fail.",
+      "root_cause": "config_invalid",
+      "confidence": 0.85,
+      "evidence": [
+       "E1",
+       "E6",
+       "E10",
+       "E16"
+      ],
+      "alternatives": [
+       "bad_release"
+      ],
+      "proposed_action": {
+       "type": "rollback",
+       "target": "orders-api",
+       "reason": "Rollback the recent configuration change that introduced an invalid timeout string format."
+      },
+      "needs_human": true
+     },
+     "candidates": [
+      {
+       "signature": "crash-after-deploy",
+       "cause": "bad_release",
+       "action": "rollback",
+       "confidence": 0.85,
+       "explain": "Pods started crash looping shortly after a deploy, and they are not running out of memory.",
+       "evidence": [
+        "E15",
+        "E16"
+       ]
+      }
+     ],
+     "signals": {
+      "oom_killed": false,
+      "crash_looping": true,
+      "image_pull_error": false,
+      "rollout_stuck": true,
+      "pods_not_ready": 1,
+      "dependency_unavailable": false,
+      "connection_errors_in_logs": false,
+      "config_error_in_logs": false,
+      "error_ratio": null,
+      "p95_seconds": 0.11,
+      "memory_peak_ratio": 0.571,
+      "cpu_ratio": 0.027,
+      "restarts_15m": 4.4,
+      "minutes_since_deploy": 2.7,
+      "suspect_revision": "3ad7f6b65b8001ad84470067d0f4ae5528005704",
+      "suspect_message": "chore(orders-api): tune redis client timeout"
+     },
+     "notes": [],
+     "snapshot": {
+      "incident": {
+       "id": 7,
+       "namespace": "demo",
+       "service": "orders-api",
+       "status": "open",
+       "severity": "critical",
+       "title": "orders-api is crash looping",
+       "opened_at": "2026-10-24T17:40:57.976+00:00",
+       "first_alert_at": "2026-10-24T17:39:53.814+00:00",
+       "updated_at": "2026-10-24T17:40:57.976+00:00",
+       "resolved_at": null,
+       "closed_at": null,
+       "raw_alert_count": 1,
+       "notification_count": 1,
+       "diagnosed_at": null,
+       "root_cause": null,
+       "proposed_action": null,
+       "telegram_message_id": null,
+       "alerts": [
+        {
+         "id": 21,
+         "incident_id": 7,
+         "fingerprint": "26e3aea61647562d",
+         "starts_at": "2026-10-24T17:39:53.814+00:00",
+         "name": "PodCrashLooping",
+         "severity": "critical",
+         "status": "firing",
+         "labels": {
+          "alertname": "PodCrashLooping",
+          "container": "orders-api",
+          "namespace": "demo",
+          "pod": "orders-api-6cdb8887f5-mbmns",
+          "prometheus": "monitoring/kps-kube-prometheus-stack-prometheus",
+          "service": "orders-api",
+          "severity": "critical"
+         },
+         "annotations": {
+          "description": "Container orders-api in pod orders-api-6cdb8887f5-mbmns restarted more than 3 times in the last 5 minutes.",
+          "summary": "orders-api is crash looping"
+         },
+         "received_at": "2026-10-24T17:40:57.976+00:00",
+         "updated_at": "2026-10-24T17:40:57.976+00:00",
+         "ends_at": null,
+         "notifications": 1
+        }
+       ]
+      },
+      "facts": [
+       {
+        "id": "E1",
+        "source": "pods",
+        "text": "pod orders-api-6cdb8887f5-mbmns: phase Running, ready False, restarts 5, last terminated Error (exit 1) at 2026-10-24T17:39:43Z"
+       },
+       {
+        "id": "E2",
+        "source": "pods",
+        "text": "pod orders-api-85ff75df5d-8hpsx: phase Running, ready True, restarts 0"
+       },
+       {
+        "id": "E3",
+        "source": "pods",
+        "text": "pod orders-api-85ff75df5d-wbn6t: phase Running, ready True, restarts 0"
+       },
+       {
+        "id": "E4",
+        "source": "deployment",
+        "text": "deployment orders-api: 2/2 ready, 1 updated, image ghcr.io/glichy-gem/orders-api:sha-2d4f696, limits {'cpu': '250m', 'memory': '128Mi'}, requests {'cpu': '50m', 'memory': '64Mi'}, env names ['ORDERS_REDIS_URL', 'ORDERS_REDIS_TIMEOUT_SECONDS']"
+       },
+       {
+        "id": "E5",
+        "source": "dependencies",
+        "text": "dependency redis of orders-api: 1/1 replicas ready"
+       },
+       {
+        "id": "E6",
+        "source": "events",
+        "text": "event Unhealthy x17 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": dial tcp 10.244.0.5:8000: connect: connection refused"
+       },
+       {
+        "id": "E7",
+        "source": "events",
+        "text": "event Unhealthy x16 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": dial tcp 10.244.0.17:8000: connect: connection refused"
+       },
+       {
+        "id": "E8",
+        "source": "events",
+        "text": "event Unhealthy x12 on Pod: Readiness probe failed: Get \"http://10.244.0.24:8000/ready\": dial tcp 10.244.0.24:8000: connect: connection refused"
+       },
+       {
+        "id": "E9",
+        "source": "events",
+        "text": "event BackOff x7 on Pod: Back-off restarting failed container orders-api in pod orders-api-*_demo(b3276dde-ddf3-47ce-90fb-f63959271e57)"
+       },
+       {
+        "id": "E10",
+        "source": "events",
+        "text": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.5:8000/health\": dial tcp 10.244.0.5:8000: connect: connection refused"
+       },
+       {
+        "id": "E11",
+        "source": "events",
+        "text": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.17:8000/health\": dial tcp 10.244.0.17:8000: connect: connection refused"
+       },
+       {
+        "id": "E12",
+        "source": "metrics",
+        "text": "p95 latency over 5m: 0.110 s"
+       },
+       {
+        "id": "E13",
+        "source": "metrics",
+        "text": "peak memory over 15m: 73 MiB = 57% of the 128 MiB limit"
+       },
+       {
+        "id": "E14",
+        "source": "metrics",
+        "text": "CPU per pod (max): 0.007 cores = 3% of the 0.25-core limit"
+       },
+       {
+        "id": "E15",
+        "source": "metrics",
+        "text": "container restarts over 15m: 4"
+       },
+       {
+        "id": "E16",
+        "source": "deploys",
+        "text": "deploy 3ad7f6b 2.7 min before the first alert: 'chore(orders-api): tune redis client timeout' by Shivam Yadav; changed lines: + - name: ORDERS_REDIS_TIMEOUT_SECONDS | + value: 1.5s"
+       },
+       {
+        "id": "E17",
+        "source": "deploys",
+        "text": "deploy 62c11bd 7.6 min before the first alert: 'deploy(orders-api): sha-2d4f696' by github-actions[bot]; changed lines: - newTag: sha-12fc565 | + newTag: sha-2d4f696"
+       }
+      ],
+      "signals": {
+       "oom_killed": false,
+       "crash_looping": true,
+       "image_pull_error": false,
+       "rollout_stuck": true,
+       "pods_not_ready": 1,
+       "dependency_unavailable": false,
+       "connection_errors_in_logs": false,
+       "config_error_in_logs": false,
+       "error_ratio": null,
+       "p95_seconds": 0.11,
+       "memory_peak_ratio": 0.571,
+       "cpu_ratio": 0.027,
+       "restarts_15m": 4.4,
+       "minutes_since_deploy": 2.7,
+       "suspect_revision": "3ad7f6b65b8001ad84470067d0f4ae5528005704",
+       "suspect_message": "chore(orders-api): tune redis client timeout"
+      },
+      "support": {
+       "rollout_stuck": "E4",
+       "p95_seconds": "E12",
+       "memory_peak_ratio": "E13",
+       "cpu_ratio": "E14",
+       "restarts_15m": "E15",
+       "crash_looping": "E15",
+       "minutes_since_deploy": "E16",
+       "suspect_revision": "E16",
+       "suspect_message": "E16"
+      },
+      "errors": [],
+      "dependencies": [
+       "redis"
+      ],
+      "dropped_evidence": []
+     }
+    }
+   ],
+   "actions": [
+    {
+     "id": 9,
+     "incident_id": 7,
+     "diagnosis_id": 10,
+     "created_at": "2026-10-24T17:42:05.072+00:00",
+     "service": "orders-api",
+     "namespace": "demo",
+     "type": "rollback",
+     "target": "orders-api",
+     "via": "git",
+     "description": "git revert 3ad7f6b in glichy-gem/kubesentinel-gitops ('chore(orders-api): tune redis client timeout', deployed 2.7 min before the symptoms)",
+     "risk": "medium",
+     "mode": "approval",
+     "reason": "medium risk: a human approves",
+     "status": "dry_run",
+     "expires_at": null,
+     "decided_at": null,
+     "decided_by": null,
+     "executed_at": null,
+     "result": null,
+     "commit_sha": null,
+     "verified_at": null,
+     "verification": null,
+     "telegram_message_id": null,
+     "params": {
+      "revision": "3ad7f6b65b8001ad84470067d0f4ae5528005704",
+      "message": "chore(orders-api): tune redis client timeout"
+     }
+    }
+   ]
+  }
+ ]
+}

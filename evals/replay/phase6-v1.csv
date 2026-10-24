@@ -1,0 +1,10 @@
+snapshot,scenario,config,prompt_version,expected_root_cause,root_cause,alternatives,confidence,action_type,expected_action,cause_exact,cause_correct,cause_top2,action_correct,source,model,latency_ms,input_tokens,output_tokens,evidence_cited,evidence_dropped,notes
+bad-config-20261024T173636Z.json,bad-config,matcher,,bad_release,bad_release,,0.85,rollback,rollback,True,True,True,True,matcher,,0,0,0,2,0,
+bad-config-20261024T173636Z.json,bad-config,llm,rca_v1,bad_release,config_invalid,bad_release,0.9,rollback,rollback,False,True,True,True,llm,gemini-3.5-flash-lite,15772,1618,184,4,0,needs_human forced on: action is not low risk
+bad-config-20261024T173636Z.json,bad-config,hybrid,rca_v1,bad_release,bad_release,config_invalid unknown,0.85,rollback,rollback,True,True,True,True,llm,gemini-3.5-flash-lite,30918,1663,170,4,0,
+bad-config-20261024T173636Z.json,bad-config,hybrid-v2,rca_v2,bad_release,bad_release,config_invalid,0.85,rollback,rollback,True,True,True,True,llm,gemini-3.5-flash-lite,31834,1787,146,4,0,
+oom-20261024T172528Z.json,oom,matcher,,memory_limit_too_low,memory_limit_too_low,,0.85,increase_memory_limit,increase_memory_limit,True,True,True,True,matcher,,0,0,0,1,0,
+oom-20261024T172528Z.json,oom,llm,rca_v1,memory_limit_too_low,unknown,memory_limit_too_low,0.5,none,increase_memory_limit,False,False,True,False,llm,gemini-3.5-flash-lite,32346,1449,174,3,0,
+oom-20261024T172528Z.json,oom,hybrid,rca_v1,memory_limit_too_low,unknown,memory_limit_too_low bad_release,0.5,none,increase_memory_limit,False,False,True,False,llm,gemini-3.5-flash-lite,38272,1491,176,3,0,
+oom-20261024T172528Z.json,oom,hybrid-v2,rca_v2,memory_limit_too_low,memory_limit_too_low,,0.85,increase_memory_limit,increase_memory_limit,True,True,True,True,,,0,0,0,1,0,"LLM call failed: no model answered (gemini-flash-latest: no response, gemini-flash-lite-latest: no response)"
+oom-20261024T172528Z.json,oom,hybrid-v2,rca_v2,memory_limit_too_low,memory_limit_too_low,saturation unknown,0.9,increase_memory_limit,increase_memory_limit,True,True,True,True,llm,gemini-3.8-flash,11057,1615,169,3,0,needs_human forced on: action is not low risk

@@ -247,6 +247,26 @@ alert reaching the webhook, so it includes rollout time, scrape and rule interva
 duration and Alertmanager `group_wait`. Recovery is from the start of the revert to every deployment
 ready, `/ready` returning 200 and Argo CD synced and healthy.
 
+## Evaluation
+
+The chaos runner also grades the agent (`make evals`). The agent runs in dry-run mode, so it diagnoses
+and proposes but changes nothing. The runner compares the first diagnosis and the proposed action
+with each scenario's answer key, and saves the evidence so the diagnosis step can be replayed offline
+under other configurations (`make replay`). Method in
+[ADR 9](docs/adr/0009-evaluate-the-agent-in-dry-run-and-replay-offline.md); analysis and failure
+write-up in [docs/evals.md](docs/evals.md).
+
+First batch (`phase6-v1`, **one run each**, so a smoke test of the method rather than accuracy statistics):
+
+| Scenario | Runs | RCA correct | Time to diagnose | Manual time | Alerts → incidents |
+|---|---|---|---|---|---|
+| Crash loop (bad config) | 1 | 1/1 | 328 s | - | 1 → 1 |
+| OOMKilled | 1 | 0/1 (said `unknown`) | 107 s | - | 2 → 1 |
+
+Unsafe actions: 0. The OOM miss came from a memory metric sampled too slowly to see the spike, which
+the model read as a contradiction. Prompt v2 fixes it on the same evidence (offline replay). The full
+batch (7 scenarios × 10 runs, about 9 hours) and the manual baseline are still to run.
+
 ## Roadmap
 
 | Phase | Weeks | Content |
@@ -256,13 +276,14 @@ ready, `/ready` returning 200 and Argo CD synced and healthy.
 | 2 | 3 | CI/CD with GitOps (done) |
 | 3 | 4-5 | Observability and alert rules (done) |
 | 4 | 6 | Failure injection framework (done) |
-| 5 | 7-8 | The agent |
-| 6 | 9 | Testing and evaluation |
+| 5 | 7-8 | The agent (done) |
+| 6 | 9 | Testing and evaluation (tooling done; full batch pending) |
 | 7 | 10 | Documentation, demo, v1.0 |
 
 ## Documentation
 
 - [Threat model](docs/threat-model.md)
+- [Evaluation and failure analysis](docs/evals.md)
 - [Architecture decision records](docs/adr/)
 
 ## License

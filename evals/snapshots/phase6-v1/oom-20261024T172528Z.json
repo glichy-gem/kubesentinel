@@ -1,0 +1,523 @@
+{
+ "scenario": "oom",
+ "injected_at": "2026-10-24T17:25:28.545312+00:00",
+ "expected": {
+  "name": "oom",
+  "description": "Requests make orders-api exceed its memory limit; containers are OOMKilled.",
+  "expected_alerts": [
+   "PodOOMKilled"
+  ],
+  "acceptable_alerts": [
+   "PodCrashLooping",
+   "DeploymentReplicasMismatch",
+   "HighErrorRate"
+  ],
+  "root_cause": "memory_limit_too_low",
+  "expected_action": "increase_memory_limit",
+  "action_mode": "approval",
+  "timeout_seconds": 300,
+  "acceptable_root_causes": [],
+  "delivered_by": "traffic",
+  "evidence_must_contain": ""
+ },
+ "incidents": [
+  {
+   "incident": {
+    "id": 6,
+    "namespace": "demo",
+    "service": "orders-api",
+    "status": "closed",
+    "severity": "critical",
+    "title": "orders-api was OOMKilled",
+    "opened_at": "2026-10-24T17:26:17.594+00:00",
+    "first_alert_at": "2026-10-24T17:25:53.814+00:00",
+    "updated_at": "2026-10-24T17:42:55.106+00:00",
+    "resolved_at": "2026-10-24T17:34:18.973+00:00",
+    "closed_at": "2026-10-24T17:36:19.570+00:00",
+    "raw_alert_count": 2,
+    "notification_count": 8,
+    "diagnosed_at": "2026-10-24T17:27:15.930+00:00",
+    "root_cause": "unknown",
+    "proposed_action": "none orders-api",
+    "telegram_message_id": null,
+    "alerts": [
+     {
+      "id": 19,
+      "incident_id": 6,
+      "fingerprint": "38e06b101bcfe42d",
+      "starts_at": "2026-10-24T17:25:53.814+00:00",
+      "name": "PodOOMKilled",
+      "severity": "critical",
+      "status": "resolved",
+      "labels": {
+       "alertname": "PodOOMKilled",
+       "container": "orders-api",
+       "endpoint": "http",
+       "instance": "10.244.0.13:8080",
+       "job": "kube-state-metrics",
+       "namespace": "demo",
+       "pod": "orders-api-5b56756f6c-zpdlc",
+       "prometheus": "monitoring/kps-kube-prometheus-stack-prometheus",
+       "reason": "OOMKilled",
+       "service": "orders-api",
+       "severity": "critical",
+       "uid": "25843c9d-b918-474a-af90-b1372954725e"
+      },
+      "annotations": {
+       "description": "Container orders-api in pod orders-api-5b56756f6c-zpdlc was killed for exceeding its memory limit and restarted.",
+       "summary": "orders-api was OOMKilled"
+      },
+      "received_at": "2026-10-24T17:26:17.594+00:00",
+      "updated_at": "2026-10-24T17:41:55.199+00:00",
+      "ends_at": "2026-10-24T17:26:53.814+00:00",
+      "notifications": 4
+     },
+     {
+      "id": 20,
+      "incident_id": 6,
+      "fingerprint": "b5247cafa15271ca",
+      "starts_at": "2026-10-24T17:26:23.814+00:00",
+      "name": "PodOOMKilled",
+      "severity": "critical",
+      "status": "resolved",
+      "labels": {
+       "alertname": "PodOOMKilled",
+       "container": "orders-api",
+       "endpoint": "http",
+       "instance": "10.244.0.13:8080",
+       "job": "kube-state-metrics",
+       "namespace": "demo",
+       "pod": "orders-api-5b56756f6c-gc99g",
+       "prometheus": "monitoring/kps-kube-prometheus-stack-prometheus",
+       "reason": "OOMKilled",
+       "service": "orders-api",
+       "severity": "critical",
+       "uid": "f889d8ec-7953-4b4b-927e-23add99476ac"
+      },
+      "annotations": {
+       "description": "Container orders-api in pod orders-api-5b56756f6c-gc99g was killed for exceeding its memory limit and restarted.",
+       "summary": "orders-api was OOMKilled"
+      },
+      "received_at": "2026-10-24T17:27:17.105+00:00",
+      "updated_at": "2026-10-24T17:42:55.106+00:00",
+      "ends_at": "2026-10-24T17:33:53.814+00:00",
+      "notifications": 4
+     }
+    ],
+    "diagnosis": {
+     "id": 9,
+     "incident_id": 6,
+     "created_at": "2026-10-24T17:27:15.930+00:00",
+     "source": "llm",
+     "root_cause": "unknown",
+     "confidence": 0.5,
+     "action_type": "none",
+     "action_target": "orders-api",
+     "prompt_version": "rca_v1",
+     "model": "gemini-3.5-flash-lite",
+     "latency_ms": 29450,
+     "input_tokens": 1491,
+     "output_tokens": 175,
+     "agrees_with_matcher": 0,
+     "collect_ms": 8165,
+     "diagnosis": {
+      "summary": "The orders-api pods experienced OOMKilled terminations, but peak memory is well below the limit, suggesting the rule matcher's OOMKilled cause contradicts actual metrics.",
+      "root_cause": "unknown",
+      "confidence": 0.5,
+      "evidence": [
+       "E1",
+       "E13"
+      ],
+      "alternatives": [
+       "memory_limit_too_low",
+       "bad_release"
+      ],
+      "proposed_action": {
+       "type": "none",
+       "target": "orders-api",
+       "reason": "Root cause is uncertain since OOMKilled events conflict with low peak memory metrics."
+      },
+      "needs_human": true
+     },
+     "candidates": [
+      {
+       "signature": "oom-killed",
+       "cause": "memory_limit_too_low",
+       "action": "increase_memory_limit",
+       "confidence": 0.85,
+       "explain": "Containers were OOMKilled; memory use reaches the container limit.",
+       "evidence": [
+        "E1"
+       ]
+      }
+     ],
+     "signals": {
+      "oom_killed": true,
+      "crash_looping": false,
+      "image_pull_error": false,
+      "rollout_stuck": false,
+      "pods_not_ready": 1,
+      "dependency_unavailable": false,
+      "connection_errors_in_logs": false,
+      "config_error_in_logs": false,
+      "error_ratio": 0.0057,
+      "p95_seconds": 0.22,
+      "memory_peak_ratio": 0.571,
+      "cpu_ratio": 0.286,
+      "restarts_15m": 2.1,
+      "minutes_since_deploy": null,
+      "suspect_revision": null,
+      "suspect_message": null
+     },
+     "notes": []
+    },
+    "evidence": [
+     {
+      "fact_id": "E1",
+      "source": "pods",
+      "content": "pod orders-api-5b56756f6c-gc99g: phase Running, ready True, restarts 13, last terminated OOMKilled (exit 137) at 2026-10-24T17:25:45Z"
+     },
+     {
+      "fact_id": "E2",
+      "source": "pods",
+      "content": "pod orders-api-5b56756f6c-zpdlc: phase Running, ready False, restarts 13, last terminated Error (exit 137) at 2026-10-24T17:26:33Z"
+     },
+     {
+      "fact_id": "E3",
+      "source": "deployment",
+      "content": "deployment orders-api: 1/2 ready, 2 updated, image ghcr.io/glichy-gem/orders-api:sha-12fc565, limits {'cpu': '250m', 'memory': '128Mi'}, requests {'cpu': '50m', 'memory': '64Mi'}, env names ['ORDERS_REDIS_URL']"
+     },
+     {
+      "fact_id": "E4",
+      "source": "dependencies",
+      "content": "dependency redis of orders-api: 1/1 replicas ready"
+     },
+     {
+      "fact_id": "E5",
+      "source": "events",
+      "content": "event Unhealthy x13 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": dial tcp 10.244.0.5:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E6",
+      "source": "events",
+      "content": "event Unhealthy x11 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": dial tcp 10.244.0.17:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E7",
+      "source": "events",
+      "content": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.5:8000/health\": dial tcp 10.244.0.5:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E8",
+      "source": "events",
+      "content": "event Unhealthy x4 on Pod: Liveness probe failed: Get \"http://10.244.0.17:8000/health\": dial tcp 10.244.0.17:8000: connect: connection refused"
+     },
+     {
+      "fact_id": "E9",
+      "source": "events",
+      "content": "event Unhealthy x3 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+     },
+     {
+      "fact_id": "E10",
+      "source": "events",
+      "content": "event Unhealthy x2 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+     },
+     {
+      "fact_id": "E11",
+      "source": "metrics",
+      "content": "5xx error ratio over 5m: 0.6%"
+     },
+     {
+      "fact_id": "E12",
+      "source": "metrics",
+      "content": "p95 latency over 5m: 0.220 s"
+     },
+     {
+      "fact_id": "E13",
+      "source": "metrics",
+      "content": "peak memory over 15m: 73 MiB = 57% of the 128 MiB limit"
+     },
+     {
+      "fact_id": "E14",
+      "source": "metrics",
+      "content": "CPU per pod (max): 0.071 cores = 29% of the 0.25-core limit"
+     },
+     {
+      "fact_id": "E15",
+      "source": "metrics",
+      "content": "container restarts over 15m: 2"
+     },
+     {
+      "fact_id": "E16",
+      "source": "deploys",
+      "content": "no deploys of orders-api in the hour before the first alert"
+     }
+    ]
+   },
+   "diagnoses": [
+    {
+     "id": 9,
+     "incident_id": 6,
+     "created_at": "2026-10-24T17:27:15.930+00:00",
+     "source": "llm",
+     "root_cause": "unknown",
+     "confidence": 0.5,
+     "action_type": "none",
+     "action_target": "orders-api",
+     "prompt_version": "rca_v1",
+     "model": "gemini-3.5-flash-lite",
+     "latency_ms": 29450,
+     "input_tokens": 1491,
+     "output_tokens": 175,
+     "agrees_with_matcher": 0,
+     "collect_ms": 8165,
+     "diagnosis": {
+      "summary": "The orders-api pods experienced OOMKilled terminations, but peak memory is well below the limit, suggesting the rule matcher's OOMKilled cause contradicts actual metrics.",
+      "root_cause": "unknown",
+      "confidence": 0.5,
+      "evidence": [
+       "E1",
+       "E13"
+      ],
+      "alternatives": [
+       "memory_limit_too_low",
+       "bad_release"
+      ],
+      "proposed_action": {
+       "type": "none",
+       "target": "orders-api",
+       "reason": "Root cause is uncertain since OOMKilled events conflict with low peak memory metrics."
+      },
+      "needs_human": true
+     },
+     "candidates": [
+      {
+       "signature": "oom-killed",
+       "cause": "memory_limit_too_low",
+       "action": "increase_memory_limit",
+       "confidence": 0.85,
+       "explain": "Containers were OOMKilled; memory use reaches the container limit.",
+       "evidence": [
+        "E1"
+       ]
+      }
+     ],
+     "signals": {
+      "oom_killed": true,
+      "crash_looping": false,
+      "image_pull_error": false,
+      "rollout_stuck": false,
+      "pods_not_ready": 1,
+      "dependency_unavailable": false,
+      "connection_errors_in_logs": false,
+      "config_error_in_logs": false,
+      "error_ratio": 0.0057,
+      "p95_seconds": 0.22,
+      "memory_peak_ratio": 0.571,
+      "cpu_ratio": 0.286,
+      "restarts_15m": 2.1,
+      "minutes_since_deploy": null,
+      "suspect_revision": null,
+      "suspect_message": null
+     },
+     "notes": [],
+     "snapshot": {
+      "incident": {
+       "id": 6,
+       "namespace": "demo",
+       "service": "orders-api",
+       "status": "open",
+       "severity": "critical",
+       "title": "orders-api was OOMKilled",
+       "opened_at": "2026-10-24T17:26:17.594+00:00",
+       "first_alert_at": "2026-10-24T17:25:53.814+00:00",
+       "updated_at": "2026-10-24T17:26:17.594+00:00",
+       "resolved_at": null,
+       "closed_at": null,
+       "raw_alert_count": 1,
+       "notification_count": 1,
+       "diagnosed_at": null,
+       "root_cause": null,
+       "proposed_action": null,
+       "telegram_message_id": null,
+       "alerts": [
+        {
+         "id": 19,
+         "incident_id": 6,
+         "fingerprint": "38e06b101bcfe42d",
+         "starts_at": "2026-10-24T17:25:53.814+00:00",
+         "name": "PodOOMKilled",
+         "severity": "critical",
+         "status": "firing",
+         "labels": {
+          "alertname": "PodOOMKilled",
+          "container": "orders-api",
+          "endpoint": "http",
+          "instance": "10.244.0.13:8080",
+          "job": "kube-state-metrics",
+          "namespace": "demo",
+          "pod": "orders-api-5b56756f6c-zpdlc",
+          "prometheus": "monitoring/kps-kube-prometheus-stack-prometheus",
+          "reason": "OOMKilled",
+          "service": "orders-api",
+          "severity": "critical",
+          "uid": "25843c9d-b918-474a-af90-b1372954725e"
+         },
+         "annotations": {
+          "description": "Container orders-api in pod orders-api-5b56756f6c-zpdlc was killed for exceeding its memory limit and restarted.",
+          "summary": "orders-api was OOMKilled"
+         },
+         "received_at": "2026-10-24T17:26:17.594+00:00",
+         "updated_at": "2026-10-24T17:26:17.594+00:00",
+         "ends_at": null,
+         "notifications": 1
+        }
+       ]
+      },
+      "facts": [
+       {
+        "id": "E1",
+        "source": "pods",
+        "text": "pod orders-api-5b56756f6c-gc99g: phase Running, ready True, restarts 13, last terminated OOMKilled (exit 137) at 2026-10-24T17:25:45Z"
+       },
+       {
+        "id": "E2",
+        "source": "pods",
+        "text": "pod orders-api-5b56756f6c-zpdlc: phase Running, ready False, restarts 13, last terminated Error (exit 137) at 2026-10-24T17:26:33Z"
+       },
+       {
+        "id": "E3",
+        "source": "deployment",
+        "text": "deployment orders-api: 1/2 ready, 2 updated, image ghcr.io/glichy-gem/orders-api:sha-12fc565, limits {'cpu': '250m', 'memory': '128Mi'}, requests {'cpu': '50m', 'memory': '64Mi'}, env names ['ORDERS_REDIS_URL']"
+       },
+       {
+        "id": "E4",
+        "source": "dependencies",
+        "text": "dependency redis of orders-api: 1/1 replicas ready"
+       },
+       {
+        "id": "E5",
+        "source": "events",
+        "text": "event Unhealthy x13 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": dial tcp 10.244.0.5:8000: connect: connection refused"
+       },
+       {
+        "id": "E6",
+        "source": "events",
+        "text": "event Unhealthy x11 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": dial tcp 10.244.0.17:8000: connect: connection refused"
+       },
+       {
+        "id": "E7",
+        "source": "events",
+        "text": "event Unhealthy x6 on Pod: Liveness probe failed: Get \"http://10.244.0.5:8000/health\": dial tcp 10.244.0.5:8000: connect: connection refused"
+       },
+       {
+        "id": "E8",
+        "source": "events",
+        "text": "event Unhealthy x4 on Pod: Liveness probe failed: Get \"http://10.244.0.17:8000/health\": dial tcp 10.244.0.17:8000: connect: connection refused"
+       },
+       {
+        "id": "E9",
+        "source": "events",
+        "text": "event Unhealthy x3 on Pod: Readiness probe failed: Get \"http://10.244.0.17:8000/ready\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+       },
+       {
+        "id": "E10",
+        "source": "events",
+        "text": "event Unhealthy x2 on Pod: Readiness probe failed: Get \"http://10.244.0.5:8000/ready\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+       },
+       {
+        "id": "E11",
+        "source": "metrics",
+        "text": "5xx error ratio over 5m: 0.6%"
+       },
+       {
+        "id": "E12",
+        "source": "metrics",
+        "text": "p95 latency over 5m: 0.220 s"
+       },
+       {
+        "id": "E13",
+        "source": "metrics",
+        "text": "peak memory over 15m: 73 MiB = 57% of the 128 MiB limit"
+       },
+       {
+        "id": "E14",
+        "source": "metrics",
+        "text": "CPU per pod (max): 0.071 cores = 29% of the 0.25-core limit"
+       },
+       {
+        "id": "E15",
+        "source": "metrics",
+        "text": "container restarts over 15m: 2"
+       },
+       {
+        "id": "E16",
+        "source": "deploys",
+        "text": "no deploys of orders-api in the hour before the first alert"
+       }
+      ],
+      "signals": {
+       "oom_killed": true,
+       "crash_looping": false,
+       "image_pull_error": false,
+       "rollout_stuck": false,
+       "pods_not_ready": 1,
+       "dependency_unavailable": false,
+       "connection_errors_in_logs": false,
+       "config_error_in_logs": false,
+       "error_ratio": 0.0057,
+       "p95_seconds": 0.22,
+       "memory_peak_ratio": 0.571,
+       "cpu_ratio": 0.286,
+       "restarts_15m": 2.1,
+       "minutes_since_deploy": null,
+       "suspect_revision": null,
+       "suspect_message": null
+      },
+      "support": {
+       "oom_killed": "E1",
+       "error_ratio": "E11",
+       "p95_seconds": "E12",
+       "memory_peak_ratio": "E13",
+       "cpu_ratio": "E14",
+       "restarts_15m": "E15"
+      },
+      "errors": [],
+      "dependencies": [
+       "redis"
+      ],
+      "dropped_evidence": []
+     }
+    }
+   ],
+   "actions": [
+    {
+     "id": 8,
+     "incident_id": 6,
+     "diagnosis_id": 9,
+     "created_at": "2026-10-24T17:27:15.983+00:00",
+     "service": "orders-api",
+     "namespace": "demo",
+     "type": "none",
+     "target": "orders-api",
+     "via": "none",
+     "description": "no action",
+     "risk": "none",
+     "mode": "none",
+     "reason": "no action proposed",
+     "status": "none",
+     "expires_at": null,
+     "decided_at": null,
+     "decided_by": null,
+     "executed_at": null,
+     "result": null,
+     "commit_sha": null,
+     "verified_at": null,
+     "verification": null,
+     "telegram_message_id": null,
+     "params": {}
+    }
+   ]
+  }
+ ]
+}
