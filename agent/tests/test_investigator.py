@@ -57,6 +57,26 @@ def test_new_incident_is_investigated_and_the_diagnosis_is_stored(tmp_path):
     assert [e["fact_id"] for e in incident["evidence"]][:1] == ["E1"]
 
 
+def test_each_diagnosis_keeps_a_replayable_snapshot(tmp_path):
+    client, investigator = make_client(tmp_path, FakeLLM(reply()))
+    incident_id = client.post(
+        "/alerts", json=am_payload(am_alert("PodOOMKilled", starts_at=T0))
+    ).json()["incidents"][0]["id"]
+    investigator._pool.shutdown(wait=True)
+
+    (diagnosis,) = client.get(f"/incidents/{incident_id}/diagnoses").json()
+    snapshot = diagnosis["snapshot"]
+    assert snapshot["incident"]["alerts"][0]["name"] == "PodOOMKilled"
+    assert "diagnosis" not in snapshot["incident"]
+    assert snapshot["signals"]["oom_killed"] is True
+    # The matcher cites the fact behind each signal, so replay needs the mapping.
+    assert snapshot["support"]["oom_killed"] in {f["id"] for f in snapshot["facts"]}
+    assert snapshot["dependencies"] == ["redis"]
+    # The incident view stays small: snapshots only come from this endpoint.
+    assert "snapshot" not in client.get(f"/incidents/{incident_id}").json()["diagnosis"]
+    assert client.get("/incidents/999/diagnoses").status_code == 404
+
+
 def test_repeat_notifications_do_not_trigger_new_investigations(tmp_path):
     llm = FakeLLM(reply())  # a second LLM call would fail: only one reply queued
     client, investigator = make_client(tmp_path, llm)

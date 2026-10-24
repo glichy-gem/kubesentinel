@@ -4,7 +4,7 @@ from conftest import am_alert, am_payload
 def test_health_ready_version(client):
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/ready").json() == {"status": "ready"}
-    assert client.get("/version").json() == {"version": "dev"}
+    assert client.get("/version").json() == {"version": "dev", "dry_run": False}
 
 
 def test_alertmanager_webhook_opens_an_incident(client):

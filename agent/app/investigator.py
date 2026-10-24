@@ -107,6 +107,21 @@ class Investigator:
                 "notes_json": json.dumps(
                     result.notes + [f"collector error: {e}" for e in evidence.errors]
                 ),
+                "snapshot_json": json.dumps(
+                    {
+                        "incident": {
+                            k: v
+                            for k, v in incident.items()
+                            if k not in ("diagnosis", "evidence")
+                        },
+                        "facts": [f.model_dump() for f in evidence.facts],
+                        "signals": evidence.signals.model_dump(),
+                        "support": evidence.support,
+                        "errors": evidence.errors,
+                        "dependencies": dependencies,
+                        "dropped_evidence": result.dropped_evidence,
+                    }
+                ),
             },
             [f.model_dump() for f in evidence.facts],
         )

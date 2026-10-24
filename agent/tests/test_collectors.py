@@ -232,6 +232,32 @@ def test_deploys_before_the_first_alert_are_described_with_their_diff():
     assert ev.signals.minutes_since_deploy == 3.0
 
 
+def test_the_agents_own_fix_is_shown_but_never_the_suspect():
+    # Found live: after an approved memory fix, the agent proposed rolling back its own commit.
+    def commit(message, author):
+        return {"commit": {"message": message, "author": {"name": author}}}
+
+    github = FakeGitHub(
+        {
+            "fix0000000": commit(
+                "fix(orders-api): raise memory limit", "KubeSentinel agent"
+            ),
+            "abc1234567": commit("chore(orders-api): tune redis timeout", "Dev"),
+        }
+    )
+    kube = cluster(
+        history=[
+            {"revision": "abc1234567", "deployedAt": ts(-20)},
+            {"revision": "fix0000000", "deployedAt": ts(-2)},
+        ]
+    )
+    ev = collector(kube, github=github).collect("demo", "orders-api", T0)
+    deploys = [f.text for f in ev.facts if f.source == "deploys"]
+    assert "a KubeSentinel remediation, not a release" in deploys[0]
+    assert ev.signals.suspect_revision == "abc1234567"
+    assert ev.signals.minutes_since_deploy == 20.0
+
+
 def test_a_failing_source_is_recorded_and_the_rest_still_run():
     kube = cluster()
     del kube.responses[f"{ARGO}/orders-api"]

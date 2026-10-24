@@ -128,9 +128,15 @@ CREATE TABLE automation_pauses (
 );
 """
 
+# Evals: everything one investigation saw (incident as it was, facts, signals and
+# which fact supports each signal), so the diagnosis step can be replayed offline.
+SCHEMA_V4 = """
+ALTER TABLE diagnoses ADD COLUMN snapshot_json TEXT;
+"""
+
 # Applied in order; PRAGMA user_version records how many have run.
 # Version 1 uses IF NOT EXISTS because databases created before migrations existed already have it.
-MIGRATIONS = [SCHEMA, SCHEMA_V2, SCHEMA_V3]
+MIGRATIONS = [SCHEMA, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
 
 # Statuses that count as "this action happened" for rate limits.
 RAN = ("approved", "executing", "executed", "recovered", "not_recovered", "failed")
@@ -138,10 +144,13 @@ RAN = ("approved", "executing", "executed", "recovered", "not_recovered", "faile
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
-def _decode_diagnosis(row: sqlite3.Row) -> dict:
+def _decode_diagnosis(row: sqlite3.Row, snapshot: bool = False) -> dict:
     out = dict(row)
+    raw_snapshot = out.pop("snapshot_json")  # large; only evals ask for it
     for key in ("diagnosis_json", "candidates_json", "signals_json", "notes_json"):
         out[key.removesuffix("_json")] = json.loads(out.pop(key))
+    if snapshot:
+        out["snapshot"] = json.loads(raw_snapshot) if raw_snapshot else None
     return out
 
 
@@ -232,6 +241,14 @@ class Database:
         incident["diagnosis"] = _decode_diagnosis(diagnosis) if diagnosis else None
         incident["evidence"] = [dict(f) for f in facts]
         return incident
+
+    def list_diagnoses(self, incident_id: int) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM diagnoses WHERE incident_id = ? ORDER BY id",
+                (incident_id,),
+            ).fetchall()
+        return [_decode_diagnosis(r, snapshot=True) for r in rows]
 
     def save_diagnosis(self, incident_id: int, record: dict, facts: list[dict]) -> int:
         """Store one investigation and stamp the incident with its outcome."""

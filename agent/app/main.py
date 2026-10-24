@@ -17,7 +17,7 @@ from app.clients import (
     PrometheusClient,
 )
 from app.collectors import Collector
-from app.config import Settings
+from app.config import AGENT_AUTHOR, Settings
 from app.correlator import Correlator
 from app.db import Database
 from app.executor import Executor, GitOpsRepo
@@ -69,7 +69,7 @@ def build_remediation(
             settings.gitops_ssh_url,
             key_dir,
             Path(settings.workdir),
-            "KubeSentinel agent",
+            AGENT_AUTHOR,
         )
     executor = Executor(db, kube, gitops, policy, notifier)
     approvals = Approvals(db, executor.submit, notifier)
@@ -79,6 +79,7 @@ def build_remediation(
         policy,
         notifier,
         executor.submit,
+        settings.dry_run,
     )
     poller = Poller(client, settings.telegram_chat_id, approvals) if client else None
     return Remediation(responder, executor, approvals, poller)
@@ -169,6 +170,8 @@ def create_app(
                 "investigate": investigator is not None,
                 "llm": settings.gemini_models if settings.gemini_api_key else None,
                 "remediate": remediation is not None,
+                "dry_run": settings.dry_run,
+                "quiet_minutes_to_close": settings.quiet_minutes_to_close,
                 "telegram": bool(remediation and remediation.poller),
                 "gitops_write": bool(remediation and remediation.executor.gitops),
                 "reconcile": reconciler is not None,
@@ -203,8 +206,9 @@ def create_app(
         return {"status": "ready"}
 
     @app.get("/version")
-    def version() -> dict[str, str]:
-        return {"version": settings.version}
+    def version() -> dict:
+        # dry_run lets the eval runner refuse to start against an agent that would act.
+        return {"version": settings.version, "dry_run": settings.dry_run}
 
     @app.get("/metrics")
     def metrics() -> Response:
@@ -254,6 +258,14 @@ def create_app(
         if incident is None:
             raise HTTPException(status_code=404, detail="incident not found")
         return incident
+
+    @app.get("/incidents/{incident_id}/diagnoses")
+    def list_diagnoses(incident_id: int) -> list[dict]:
+        """Every investigation of an incident, oldest first, with the snapshot of
+        what it saw, so evals can replay the diagnosis step offline."""
+        if db.get_incident(incident_id) is None:
+            raise HTTPException(status_code=404, detail="incident not found")
+        return db.list_diagnoses(incident_id)
 
     @app.post("/incidents/{incident_id}/investigate", status_code=202)
     def reinvestigate(incident_id: int) -> dict:

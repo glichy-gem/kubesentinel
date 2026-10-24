@@ -70,7 +70,16 @@ class GitOpsRepo:
             check=False,
         )
         if result.returncode != 0:
-            raise GitError(f"git {args[0]} failed: {result.stderr.strip()[-300:]}")
+            # git revert reports a conflict on stdout, so keep both, minus git's
+            # "hint:" advice. Found live: a failed revert was reported only as
+            # "git revert failed: ".
+            lines = (result.stdout + "\n" + result.stderr).splitlines()
+            output = " ".join(
+                line.strip()
+                for line in lines
+                if line.strip() and not line.startswith("hint:")
+            )
+            raise GitError(f"git {args[0]} failed: {output[-300:]}")
         return result.stdout.strip()
 
     def commit(self, message: str, change: Callable[[Path], None]) -> str:

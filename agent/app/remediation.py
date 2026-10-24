@@ -251,12 +251,14 @@ class Responder:
         policy: Policy,
         notifier,  # app.telegram.Notifier or None
         execute: Callable[[int], None],  # queue an action id for execution
+        dry_run: bool = False,  # evals: record the decision, change nothing
     ) -> None:
         self.db = db
         self.planner = planner
         self.policy = policy
         self.notifier = notifier
         self.execute = execute
+        self.dry_run = dry_run
 
     def respond(
         self, incident: dict, diagnosis_id: int, diagnosis, signals: Signals, evidence
@@ -290,13 +292,20 @@ class Responder:
             )
 
         self.db.supersede_pending(incident["id"])
-        token = secrets.token_urlsafe(12) if decision.mode == "approval" else None
+        # The mode is still decided and recorded, so evals measure the real policy outcome.
+        token = (
+            secrets.token_urlsafe(12)
+            if decision.mode == "approval" and not self.dry_run
+            else None
+        )
         status = {
             "auto": "approved",
             "approval": "proposed",
             "blocked": "blocked",
             "none": "none",
         }[decision.mode]
+        if self.dry_run and status in ("approved", "proposed"):
+            status = "dry_run"
         action_id = self.db.insert_action(
             {
                 "incident_id": incident["id"],
@@ -319,8 +328,8 @@ class Responder:
                 )
                 if token
                 else None,
-                "decided_at": iso(now) if decision.mode == "auto" else None,
-                "decided_by": "policy (auto)" if decision.mode == "auto" else None,
+                "decided_at": iso(now) if status == "approved" else None,
+                "decided_by": "policy (auto)" if status == "approved" else None,
             }
         )
         action = self.db.get_action(action_id)
@@ -336,6 +345,8 @@ class Responder:
                 }
             },
         )
+        if self.dry_run:
+            return action
         if self.notifier is not None:
             self.notifier.incident_card(
                 self.db.get_incident(incident["id"]), action, token
