@@ -18,7 +18,7 @@ YQ_IMAGE       ?= mikefarah/yq:4.47.1
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.10.0
 RULES_TMP      := $(CURDIR)/.tmp/rules
 
-.PHONY: cluster down status test agent-test agent-secret eval-mode-on eval-mode-off agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test evals safety-test
+.PHONY: cluster down status test agent-test agent-secret eval-mode-on eval-mode-off agent-git-key argocd argocd-status stack stack-template stack-status grafana-password rules-test chaos chaos-test evals safety-test replay report manual evals-test
 
 cluster:
 	kind create cluster --config $(KIND_CONFIG)
@@ -173,6 +173,28 @@ evals:
 # Design doc 8.6: what the agent's ServiceAccount can and cannot do, live.
 safety-test:
 	bash evals/safety-check.sh
+
+# Replay the diagnosis step on a batch's saved evidence under other configurations
+# (matcher only, LLM only, matcher + LLM, prompt v2). Runs in the agent's env with
+# the Gemini key from .env; cached, so re-run it to fill gaps after quota errors.
+CONFIGS ?= matcher,llm,hybrid,hybrid-v2
+replay:
+	@test -n "$(EVAL_ID)" || (echo "usage: make replay EVAL_ID=<id>"; exit 2)
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	cd agent && uv run python ../evals/replay.py $(EVAL_ID) --configs $(CONFIGS)
+
+# Tables and charts for a batch: docs/evals/<EVAL_ID>/.
+report:
+	uv run --with pandas --with matplotlib --with tabulate \
+	  evals/report.py $(EVAL_ID)
+
+# Time yourself on a random, hidden scenario without the agent (manual baseline).
+manual:
+	uv run evals/manual_baseline.py
+
+# Unit tests for the replay tool (in the agent's env: it imports the agent's code).
+evals-test:
+	cd agent && uv run pytest -q ../evals/tests
 
 # Validate the alert rules and run their unit tests with promtool.
 rules-test:

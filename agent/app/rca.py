@@ -7,6 +7,7 @@ confidence), and on any failure the matcher's answer is used instead.
 
 import json
 import logging
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -18,8 +19,17 @@ from app.matcher import Action, Candidate, Cause
 
 logger = logging.getLogger("kubesentinel.rca")
 
-PROMPT_VERSION = "rca_v1"
-SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text()
+PROMPT_VERSION = "rca_v1"  # the version that runs live
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+@cache
+def load_prompt(version: str) -> str:
+    """Other versions are loaded by the offline replay (evals/replay.py)."""
+    return (PROMPTS_DIR / f"{version}.md").read_text()
+
+
+SYSTEM_PROMPT = load_prompt(PROMPT_VERSION)
 LOW_RISK_ACTIONS = {"scale_up", "restart_pod", "none"}
 
 
@@ -167,6 +177,7 @@ def diagnose(
     candidates: list[Candidate],
     provider: LLMProvider | None,
     dependencies: list[str],
+    prompt_version: str = PROMPT_VERSION,
 ) -> RCAResult:
     fallback = matcher_diagnosis(incident, candidates, dependencies)
     if provider is None:
@@ -174,13 +185,14 @@ def diagnose(
             diagnosis=fallback, source="matcher", notes=["no LLM configured"]
         )
 
+    system = load_prompt(prompt_version)
     prompt = build_prompt(incident, evidence, candidates)
     notes: list[str] = []
     reply = None
     diagnosis = None
     for attempt in (1, 2):
         try:
-            reply = provider.generate_json(SYSTEM_PROMPT, prompt, RESPONSE_SCHEMA)
+            reply = provider.generate_json(system, prompt, RESPONSE_SCHEMA)
             diagnosis = Diagnosis.model_validate(json.loads(reply.text))
             break
         except LLMError as exc:
@@ -190,9 +202,14 @@ def diagnose(
             notes.append(f"invalid LLM reply (attempt {attempt}): {type(exc).__name__}")
             prompt += f"\n\nYour previous reply was invalid ({str(exc)[:300]}). Return valid JSON only."
 
+    def result(diagnosis, source, **kwargs) -> RCAResult:
+        return _result(
+            diagnosis, source, reply, prompt_version=prompt_version, **kwargs
+        )
+
     if diagnosis is None:
         logger.warning("falling back to matcher", extra={"fields": {"notes": notes}})
-        return _result(fallback, "matcher", reply, notes=notes)
+        return result(fallback, "matcher", notes=notes)
 
     # Citation check: only ids that were actually collected count.
     cited = list(dict.fromkeys(diagnosis.evidence))
@@ -200,7 +217,7 @@ def diagnose(
     dropped = [e for e in cited if e not in evidence.fact_ids]
     if not valid:
         notes.append("LLM cited no collected evidence; using the matcher")
-        return _result(fallback, "matcher", reply, dropped=dropped, notes=notes)
+        return result(fallback, "matcher", dropped=dropped, notes=notes)
     if dropped:
         notes.append(f"dropped invented evidence ids {dropped}")
         diagnosis.confidence = round(diagnosis.confidence * len(valid) / len(cited), 3)
@@ -225,15 +242,23 @@ def diagnose(
         diagnosis.needs_human = True
 
     agrees = candidates[0].cause == diagnosis.root_cause if candidates else None
-    return _result(diagnosis, "llm", reply, dropped=dropped, notes=notes, agrees=agrees)
+    return result(diagnosis, "llm", dropped=dropped, notes=notes, agrees=agrees)
 
 
 def _result(
-    diagnosis, source, reply, *, dropped=(), notes=(), agrees=None
+    diagnosis,
+    source,
+    reply,
+    *,
+    prompt_version=PROMPT_VERSION,
+    dropped=(),
+    notes=(),
+    agrees=None,
 ) -> RCAResult:
     return RCAResult(
         diagnosis=diagnosis,
         source=source,
+        prompt_version=prompt_version,
         model=reply.model if reply else "",
         latency_ms=reply.latency_ms if reply else 0,
         input_tokens=reply.input_tokens if reply else 0,

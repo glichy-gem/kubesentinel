@@ -1,0 +1,38 @@
+name: evals
+
+# Design doc 8.7: a change to how the agent diagnoses is checked against real
+# recorded incidents, offline. Matcher-only replay needs no LLM key and no
+# cluster; LLM and prompt comparisons are run by hand (make replay) because
+# they cost quota and are not deterministic.
+on:
+  pull_request:
+    paths:
+      - "agent/app/**"
+      - "evals/**"
+      - ".github/workflows/evals.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    name: offline replay on recorded incidents
+    runs-on: ubuntu-latest
+    env:
+      # The batch the README numbers come from, and the matcher accuracy it reached.
+      EVAL_ID: phase6-v1
+      MATCHER_FLOOR: "1.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install the agent's dependencies
+        working-directory: agent
+        run: uv sync --frozen
+      - name: Lint
+        run: uvx ruff@0.17.1 check evals && uvx ruff@0.17.1 format --check evals
+      - name: Replay tool tests
+        working-directory: agent
+        run: uv run pytest -q ../evals/tests
+      - name: Matcher accuracy must not drop
+        working-directory: agent
+        run: uv run python ../evals/replay.py "$EVAL_ID" --check "$MATCHER_FLOOR"
